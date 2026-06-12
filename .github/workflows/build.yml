@@ -8,13 +8,23 @@ on:
 
 jobs:
   build-host:
-    name: Build Rust Host
+    name: Build Linux host (daemon + GUI + helper)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxkbcommon-dev libwayland-dev libxcb-render0-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev libssl-dev \
+            libdrm-dev
+          # libevdi headers are needed only for the C helper; not in all repos
+          sudo apt-get install -y libevdi0-dev || echo "libevdi-dev unavailable, helper build will be skipped"
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -25,16 +35,22 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build host daemon
-        run: |
-          cd host
-          cargo build --release
+      - name: Build daemon and GUI
+        run: cargo build --release
 
-      - name: Upload host binary
+      - name: Run tests
+        run: cargo test --release
+
+      - name: Build EVDI helper
+        run: make build-helper || echo "Skipped (libevdi headers not available)"
+
+      - name: Upload host binaries
         uses: actions/upload-artifact@v4
         with:
           name: uscreen-linux-x86_64
-          path: target/release/uscreen
+          path: |
+            target/release/uscreen
+            target/release/uscreen-gui
 
   build-android:
     name: Build Android APK

@@ -10,8 +10,9 @@ DATA_DIR = ${HOME}/.local/share/uscreen
 
 all: build
 
+# Generic -O3 (no -march=native): release binaries must run on any x86-64 CPU
 build-helper:
-	$(CC) -O3 -march=native -o host/evdi/evdi_helper host/evdi/evdi_helper.c -levdi -ldrm -lpthread -Ihost/evdi -I/usr/include
+	$(CC) -O3 -o host/evdi/evdi_helper host/evdi/evdi_helper.c -levdi -ldrm -lpthread -Ihost/evdi -I/usr/include
 	@echo "✓ EVDI helper: host/evdi/evdi_helper"
 
 build: build-helper

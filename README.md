@@ -4,6 +4,10 @@ Turn your Android tablet into a low-latency secondary display for Linux, connect
 
 Inspired by SuperDisplay for Windows. Built for Linux (Bazzite, Fedora, Arch, etc.).
 
+> **Status:** tested on Bazzite (KDE Plasma, NVIDIA) with a Samsung Galaxy Tab S9 Ultra.
+> It should work with any Android 8+ tablet (auto-resolution) and any distro with the
+> `evdi` kernel module — reports and PRs welcome!
+
 ## Features
 
 - **Plug and play**: the daemon watches for the tablet over ADB — plug in the USB cable and the app launches on the tablet automatically
