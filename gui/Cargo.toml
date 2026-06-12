@@ -1,0 +1,10 @@
+[package]
+name = "uscreen-gui"
+version = "0.1.0"
+edition = "2021"
+description = "Settings and status GUI for the uscreen USB display server"
+
+[dependencies]
+eframe = "0.32"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

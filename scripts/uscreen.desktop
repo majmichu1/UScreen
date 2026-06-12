@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=UScreen
+Comment=Use your Android tablet as a USB second display
+Exec=uscreen-gui
+Icon=video-display
+Terminal=false
+Categories=Utility;Settings;
+Keywords=display;tablet;second screen;monitor;

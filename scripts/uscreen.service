@@ -1,0 +1,16 @@
+[Unit]
+Description=UScreen - USB Second Display Server
+Documentation=https://github.com/uscreen/uscreen
+After=network.target graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/uscreen --helper %h/.local/bin/evdi_helper --edid %h/.local/share/uscreen/edid/s9ultra.bin
+ExecStop=%h/.local/bin/uscreen stop
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

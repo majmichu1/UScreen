@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Auto-connect script launched by udev when an Android device is plugged in
+set -euo pipefail
+
+LOGFILE="/tmp/uscreen-connect.log"
+VIDEO_PORT=8890
+INPUT_PORT=8891
+
+log() {
+    echo "[$(date '+%H:%M:%S')] $1" >> "$LOGFILE"
+}
+
+log "Device connected, waiting for ADB..."
+
+sleep 2
+
+if ! command -v adb &>/dev/null; then
+    log "adb not found"
+    exit 1
+fi
+
+if ! adb get-state 2>/dev/null | grep -q device; then
+    log "No Android device detected via ADB"
+    exit 1
+fi
+
+DEVICE_SERIAL=$(adb devices | grep -v "List" | grep "device$" | head -1 | awk '{print $1}')
+log "Found device: $DEVICE_SERIAL"
+
+adb reverse tcp:$VIDEO_PORT tcp:$VIDEO_PORT && \
+    log "Forwarded tcp:$VIDEO_PORT" || \
+    log "Failed to forward tcp:$VIDEO_PORT"
+
+adb reverse tcp:$INPUT_PORT tcp:$INPUT_PORT && \
+    log "Forwarded tcp:$INPUT_PORT" || \
+    log "Failed to forward tcp:$INPUT_PORT"
+
+if ! pgrep -f "uscreen.*daemon" > /dev/null; then
+    log "Starting uscreen daemon..."
+    nohup "$HOME/.local/bin/uscreen" start > /tmp/uscreen-daemon.log 2>&1 &
+    disown
+    log "uscreen daemon started"
+fi
+
+log "Connection complete"

@@ -1,0 +1,37 @@
+# Rust
+/target/
+
+# Cargo.lock is committed intentionally (this is a binary project)
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.apk
+
+# Release signing — NEVER commit these
+android/keystore.properties
+*.keystore
+*.jks
+
+# Release tarballs
+/dist/
+
+# EDID binaries (regenerate with: python3 scripts/gen-edid.py)
+edid/*.bin
+s9ultra.bin
+
+# EVDI compiled helper
+host/evdi/evdi_helper
+
+# OS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Temporary files
+/tmp/
+*.fifo
