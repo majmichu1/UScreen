@@ -120,61 +120,124 @@ impl CaptureManager {
         Ok(())
     }
 
-    /// Find the EVDI DVI output via kscreen-doctor, enable it, and set position.
-    /// Retries up to ~3 seconds with 200ms gaps so KWin has time to discover the new output.
+    /// Find the EVDI DVI output via kscreen-doctor, enable it, and position it
+    /// to the right of all currently-enabled displays.
+    ///
+    /// The position is derived at runtime from the existing display geometry so
+    /// it works regardless of the laptop's screen resolution or scaling factor.
+    /// (The old hardcoded "position.1920.0" was wrong for anything other than a
+    /// 1920-px-wide logical display, and the syntax requires a comma not a dot.)
     async fn enable_evdi_display() {
+        // Retry: KWin may not have registered the new EVDI device yet.
         let mut evdi_id: Option<u32> = None;
-        for attempt in 0..15 {
-            let output = tokio::process::Command::new("kscreen-doctor")
+        let mut x_pos: i64 = 1920; // fallback if parsing fails
+
+        for _ in 0..15 {
+            let Ok(o) = tokio::process::Command::new("kscreen-doctor")
                 .arg("-o")
                 .output()
-                .await;
-            if let Ok(o) = output {
-                let stdout = String::from_utf8_lossy(&o.stdout);
-                for line in stdout.lines() {
-                    let line = line.trim();
-                    if let Some(rest) = line.strip_prefix("Output:") {
-                        let parts: Vec<&str> = rest.trim().split_whitespace().collect();
-                        if parts.len() >= 2 && parts.get(1).copied().unwrap_or("").contains("DVI") {
-                            evdi_id = parts[0].parse::<u32>().ok();
-                            break;
+                .await
+            else {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                continue;
+            };
+
+            let text = String::from_utf8_lossy(&o.stdout);
+
+            // Parse outputs into (id, name, enabled, right_edge).
+            // Geometry line: "Geometry:  X,Y WxH" — W and H are logical pixels.
+            struct Out { id: u32, is_evdi: bool, enabled: bool, right_edge: i64 }
+            let mut outs: Vec<Out> = Vec::new();
+            let mut cur: Option<Out> = None;
+
+            for line in text.lines() {
+                let t = line.trim();
+                if let Some(rest) = t.strip_prefix("Output:") {
+                    if let Some(prev) = cur.take() { outs.push(prev); }
+                    let mut parts = rest.trim().split_whitespace();
+                    let id = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                    let name = parts.next().unwrap_or("");
+                    cur = Some(Out { id, is_evdi: name.contains("DVI"), enabled: false, right_edge: 0 });
+                } else if t == "enabled" {
+                    if let Some(ref mut o) = cur { o.enabled = true; }
+                } else if let Some(ref mut o) = cur {
+                    if let Some(geom) = t.strip_prefix("Geometry:") {
+                        // "X,Y WxH"
+                        if let Some((pos, size)) = geom.trim().split_once(' ') {
+                            if let (Some(xs), Some(ws)) = (pos.split(',').next(), size.split('x').next()) {
+                                if let (Ok(x), Ok(w)) = (xs.parse::<i64>(), ws.parse::<i64>()) {
+                                    o.right_edge = x + w;
+                                }
+                            }
                         }
                     }
                 }
             }
-            if evdi_id.is_some() {
-                break;
-            }
+            if let Some(prev) = cur { outs.push(prev); }
+
+            evdi_id = outs.iter().find(|o| o.is_evdi).map(|o| o.id);
+            x_pos = outs.iter()
+                .filter(|o| !o.is_evdi && o.enabled)
+                .map(|o| o.right_edge)
+                .max()
+                .unwrap_or(1920);
+
+            if evdi_id.is_some() { break; }
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
-        if let Some(id) = evdi_id {
-            info!("Enabling EVDI display (output.{})", id);
-            for cmd in &[
-                format!("output.{}.mode.1", id),
-                format!("output.{}.enable", id),
-                format!("output.{}.position.1920.0", id),
-            ] {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                let r = tokio::process::Command::new("kscreen-doctor")
-                    .arg(cmd)
-                    .output()
-                    .await;
-                match r {
-                    Ok(o) if o.status.success() => info!("kscreen-doctor {}: ok", cmd),
-                    _ => warn!("kscreen-doctor {}: failed (may be harmless)", cmd),
-                }
-            }
-        } else {
+
+        let Some(id) = evdi_id else {
             warn!("No EVDI output found after 3s");
+            return;
+        };
+
+        info!("Enabling EVDI display (output.{}) at position ({}, 0)", id, x_pos);
+        // All args in one kscreen-doctor call so KDE applies them atomically.
+        // Position syntax is "X,Y" (comma-separated).
+        let r = tokio::process::Command::new("kscreen-doctor")
+            .arg(format!("output.{}.enable", id))
+            .arg(format!("output.{}.position.{},0", id, x_pos))
+            .output()
+            .await;
+        match r {
+            Ok(o) if o.status.success() => info!("kscreen-doctor enable+position: ok"),
+            Ok(o) => warn!("kscreen-doctor failed: {}", String::from_utf8_lossy(&o.stderr).trim()),
+            Err(e) => warn!("kscreen-doctor error: {}", e),
         }
     }
 
     async fn start_helper(&mut self) -> Result<()> {
         Self::ensure_fifo(FIFO_PATH)?;
 
+        // Kill any stray helper from a previous run before spawning a new one.
+        // kill_on_drop only fires on a graceful exit; if the daemon was
+        // SIGKILLed, pkill'd, or crashed, its helper is orphaned and keeps
+        // writing full frames into the shared FIFO. Several such orphans
+        // interleave their output, which the encoder reads as a single
+        // stream — producing torn, banded frames mixing several captures.
+        // -x matches the process name exactly so it never hits this daemon
+        // (whose own command line contains the helper path via --helper).
+        let killed = Command::new("pkill")
+            .args(["-x", "evdi_helper"])
+            .status()
+            .await
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if killed {
+            warn!("Killed stray evdi_helper process(es) before starting");
+            // Give the kernel a moment to release the EVDI device(s) and
+            // drop the old FIFO write end before we open a fresh one.
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
+
+        // EDID 1.4 pixel-clock field is 16-bit (max 655 MHz).
+        // 2960×1848 @120 Hz needs ~706 MHz which overflows.
+        // Cap the EDID at 90 Hz so KDE can render at 90 fps; the helper
+        // captures at the configured fps independently via clock_nanosleep.
+        let edid_fps = self.config.fps.min(90);
         let edid_path = match &self.config.edid_path {
             Some(p) => p.clone(),
-            None => crate::edid::ensure_edid(self.config.width, self.config.height, 60)?,
+            None => crate::edid::ensure_edid(self.config.width, self.config.height, edid_fps)?,
         };
 
         let mut cmd = Command::new(&self.config.helper_path);
@@ -257,7 +320,10 @@ impl CaptureManager {
             "-f".into(),
             "rawvideo".into(),
             "-pix_fmt".into(),
-            "bgr0".into(),  // EVDI outputs XRGB8888 = B-G-R-X byte order on little-endian
+            // The helper converts the BGRA framebuffer to NV12 before the
+            // FIFO: 1.5 bytes/px instead of 4, so the raw-frame copies that
+            // bottleneck the pipeline shrink 2.7x and NVENC takes it directly.
+            "nv12".into(),
             "-s".into(),
             format!("{}x{}", w, h),
             "-framerate".into(),
@@ -302,6 +368,10 @@ impl CaptureManager {
                 "bt709".into(),
                 "-colorspace".into(),
                 "bt709".into(),
+                // Helper emits BT.709 limited-range NV12; tag it so the
+                // decoder expands the range correctly (no washed-out levels).
+                "-color_range".into(),
+                "tv".into(),
                 "-rc".into(),
                 "cbr".into(),
                 "-b:v".into(),

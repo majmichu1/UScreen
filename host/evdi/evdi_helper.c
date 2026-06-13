@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include "evdi_drm.h"
 #include "evdi_lib.h"
 
@@ -40,7 +41,7 @@ static unsigned char *g_fill = NULL;
 static unsigned char *g_latest = NULL;
 static unsigned char *g_write = NULL;
 static volatile int g_latest_valid = 0;
-static int g_packed_size = 0;          /* tightly packed w*h*4 */
+static int g_packed_size = 0;          /* NV12 frame: w*h*3/2 */
 static volatile int g_buffers_ready = 0;
 
 static volatile int g_update_pending = 0;  /* request_update sent, waiting for update_ready */
@@ -65,22 +66,135 @@ static void on_dpms(int dpms_mode, void *user_data) {
     fprintf(stderr, "[evdi-helper] DPMS: %d (%s)\n", dpms_mode, g_dpms_on ? "ON" : "OFF");
 }
 
-/* Pack the stride-padded framebuffer into the fill buffer and publish it
-   as the latest frame. Called from the event-loop thread after a grab. */
+/* --- BGRA -> NV12 conversion -------------------------------------------
+   The kernel hands us a 32-bit BGRA framebuffer (21.9 MB at 2960x1848).
+   Feeding that raw to the encoder is memory-bandwidth bound: it gets copied
+   three times per frame (pack + pipe write + pipe read), which caps the
+   pipeline around 70 fps even though NVENC itself sits near-idle. NV12 is
+   1.5 bytes/px (8.2 MB) — 2.7x less data through every stage — and NVENC
+   accepts it natively, so the encoder no longer color-converts either.
+
+   Conversion uses BT.709 limited-range coefficients (matching the bt709
+   tags the encoder writes) and is split across a small thread pool so it
+   costs ~1 ms rather than stalling the capture loop. */
+
+typedef struct {
+    const unsigned char *src;   /* BGRA, stride-padded */
+    unsigned char *ydst;        /* Y plane, w bytes/row */
+    unsigned char *uvdst;       /* interleaved CbCr, w bytes per chroma row */
+    int w, h, stride;
+    int cy0, cy1;               /* chroma-row range [cy0, cy1) this job owns */
+} conv_job_t;
+
+static inline void convert_strip(const conv_job_t *j) {
+    const int w = j->w, stride = j->stride;
+    for (int cy = j->cy0; cy < j->cy1; cy++) {
+        int y0 = cy * 2, y1 = y0 + 1;
+        const unsigned char *row0 = j->src + (size_t)y0 * stride;
+        const unsigned char *row1 = j->src + (size_t)y1 * stride;
+        unsigned char *yo0 = j->ydst + (size_t)y0 * w;
+        unsigned char *yo1 = j->ydst + (size_t)y1 * w;
+        unsigned char *uv  = j->uvdst + (size_t)cy * w;
+        for (int x = 0; x < w; x += 2) {
+            const unsigned char *p;
+            int b, g, r, sb, sg, sr;
+            p = row0 + (size_t)x * 4;       b = p[0]; g = p[1]; r = p[2];
+            yo0[x]   = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
+            sb = b; sg = g; sr = r;
+            p = row0 + (size_t)(x+1) * 4;   b = p[0]; g = p[1]; r = p[2];
+            yo0[x+1] = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
+            sb += b; sg += g; sr += r;
+            p = row1 + (size_t)x * 4;       b = p[0]; g = p[1]; r = p[2];
+            yo1[x]   = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
+            sb += b; sg += g; sr += r;
+            p = row1 + (size_t)(x+1) * 4;   b = p[0]; g = p[1]; r = p[2];
+            yo1[x+1] = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
+            sb += b; sg += g; sr += r;
+            int ar = sr >> 2, ag = sg >> 2, ab = sb >> 2;  /* 2x2 chroma average */
+            int cb = (((-26*ar - 87*ag + 112*ab + 128) >> 8) + 128);
+            int cr = (((112*ar - 102*ag - 10*ab + 128) >> 8) + 128);
+            if (cb < 0) cb = 0; else if (cb > 255) cb = 255;
+            if (cr < 0) cr = 0; else if (cr > 255) cr = 255;
+            uv[x]   = (unsigned char)cb;
+            uv[x+1] = (unsigned char)cr;
+        }
+    }
+}
+
+#define MAX_CONV_THREADS 8
+static int g_nthreads = 1;
+static pthread_t g_pool[MAX_CONV_THREADS];
+static conv_job_t g_jobs[MAX_CONV_THREADS];
+static pthread_mutex_t g_pool_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_pool_go = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_pool_done = PTHREAD_COND_INITIALIZER;
+static int g_pool_gen = 0;       /* bumped to dispatch a frame */
+static int g_pool_active = 0;    /* worker jobs still running this gen */
+static int g_pool_shutdown = 0;
+
+static void *conv_worker(void *arg) {
+    int id = (int)(intptr_t)arg;
+    int last_gen = 0;
+    for (;;) {
+        pthread_mutex_lock(&g_pool_mtx);
+        while (g_pool_gen == last_gen && !g_pool_shutdown)
+            pthread_cond_wait(&g_pool_go, &g_pool_mtx);
+        if (g_pool_shutdown) { pthread_mutex_unlock(&g_pool_mtx); break; }
+        last_gen = g_pool_gen;
+        pthread_mutex_unlock(&g_pool_mtx);
+
+        convert_strip(&g_jobs[id]);
+
+        pthread_mutex_lock(&g_pool_mtx);
+        if (--g_pool_active == 0)
+            pthread_cond_signal(&g_pool_done);
+        pthread_mutex_unlock(&g_pool_mtx);
+    }
+    return NULL;
+}
+
+static void conv_pool_init(void) {
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    g_nthreads = (int)(n - 2);              /* leave cores for ffmpeg/KWin */
+    if (g_nthreads < 1) g_nthreads = 1;
+    if (g_nthreads > MAX_CONV_THREADS) g_nthreads = MAX_CONV_THREADS;
+    /* Worker threads handle jobs 1..n-1; the caller runs job 0 itself. */
+    for (int i = 1; i < g_nthreads; i++)
+        pthread_create(&g_pool[i], NULL, conv_worker, (void *)(intptr_t)i);
+    fprintf(stderr, "[evdi-helper] NV12 conversion using %d thread(s)\n", g_nthreads);
+}
+
+static void bgra_to_nv12(const unsigned char *src, unsigned char *dst) {
+    int ch = g_mode_h / 2;
+    unsigned char *ydst = dst;
+    unsigned char *uvdst = dst + (size_t)g_mode_w * g_mode_h;
+    for (int i = 0; i < g_nthreads; i++) {
+        g_jobs[i] = (conv_job_t){ src, ydst, uvdst, g_mode_w, g_mode_h, g_mode_stride,
+                                  ch * i / g_nthreads, ch * (i + 1) / g_nthreads };
+    }
+    if (g_nthreads > 1) {
+        pthread_mutex_lock(&g_pool_mtx);
+        g_pool_active = g_nthreads - 1;
+        g_pool_gen++;
+        pthread_cond_broadcast(&g_pool_go);
+        pthread_mutex_unlock(&g_pool_mtx);
+    }
+    convert_strip(&g_jobs[0]);              /* caller does its own strip */
+    if (g_nthreads > 1) {
+        pthread_mutex_lock(&g_pool_mtx);
+        while (g_pool_active > 0)
+            pthread_cond_wait(&g_pool_done, &g_pool_mtx);
+        pthread_mutex_unlock(&g_pool_mtx);
+    }
+}
+
+/* Convert the stride-padded BGRA framebuffer into the NV12 fill buffer and
+   publish it as the latest frame. Called from the event-loop thread. */
 static void publish_frame(void) {
     if (!g_buffers_ready || !g_framebuffer)
         return;
 
-    int row_bytes = g_mode_w * g_mode_bpp;
-    if (g_mode_stride == row_bytes) {
-        memcpy(g_fill, g_framebuffer, (size_t)g_packed_size);
-    } else {
-        for (int y = 0; y < g_mode_h; y++) {
-            memcpy(g_fill + (size_t)y * row_bytes,
-                   g_framebuffer + (size_t)y * g_mode_stride,
-                   (size_t)row_bytes);
-        }
-    }
+    bgra_to_nv12(g_framebuffer, g_fill);
 
     pthread_mutex_lock(&g_swap_mutex);
     unsigned char *tmp = g_latest;
@@ -154,7 +268,8 @@ static void on_mode_changed(struct evdi_mode mode, void *user_data) {
     free(g_framebuffer);
     g_framebuffer = malloc(g_fb_size);
 
-    g_packed_size = row_bytes * g_mode_h;
+    /* Packed buffers hold NV12 (Y plane + half-size interleaved CbCr). */
+    g_packed_size = g_mode_w * g_mode_h * 3 / 2;
     free(g_fill);   g_fill = malloc(g_packed_size);
     free(g_latest); g_latest = malloc(g_packed_size);
     free(g_write);  g_write = malloc(g_packed_size);
@@ -548,6 +663,7 @@ int main(int argc, char *argv[]) {
     pthread_t writer = 0;
     if (fifo_path) {
         g_fifo_path = fifo_path;
+        conv_pool_init();   /* spawn NV12 conversion workers before first grab */
         fprintf(stderr, "[evdi-helper] Capture FIFO: %s (opened on demand)\n", fifo_path);
         if (pthread_create(&writer, NULL, writer_thread, NULL) != 0) {
             fprintf(stderr, "[evdi-helper] Failed to start writer thread\n");
