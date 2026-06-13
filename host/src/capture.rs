@@ -277,6 +277,10 @@ impl CaptureManager {
 
         if encoder == "h264_nvenc" {
             let bitrate_m = bitrate as f64 / 1000.0;
+            // bufsize = 2 frames of bits: keeps VBV under 2-frame delay.
+            // At 20 Mbps / 60 fps that is ~667 kbps — tiny compared to the
+            // old fixed 1.0M (8 Mbits = ~400 ms at 20 Mbps).
+            let bufsize_k = (bitrate * 2 / fps.max(1)).max(200);
             encoder_args.extend_from_slice(&[
                 "-preset".into(),
                 "p1".into(),
@@ -290,6 +294,8 @@ impl CaptureManager {
                 "0".into(),
                 "-rc-lookahead".into(),
                 "0".into(),
+                "-multipass".into(),
+                "0".into(),
                 "-color_primaries".into(),
                 "bt709".into(),
                 "-color_trc".into(),
@@ -297,15 +303,13 @@ impl CaptureManager {
                 "-colorspace".into(),
                 "bt709".into(),
                 "-rc".into(),
-                "vbr".into(),
-                "-cq".into(),
-                "20".into(),
+                "cbr".into(),
                 "-b:v".into(),
                 format!("{:.1}M", bitrate_m),
                 "-maxrate".into(),
                 format!("{:.1}M", bitrate_m),
                 "-bufsize".into(),
-                "1.0M".into(),  // small VBV = lower latency
+                format!("{}k", bufsize_k),
                 "-g".into(),
                 gop.to_string(),
                 "-forced-idr".into(),
@@ -327,6 +331,7 @@ impl CaptureManager {
                 "1".into(),
             ]);
         } else if encoder == "libx264" {
+            let bufsize_k = (bitrate * 2 / fps.max(1)).max(200);
             encoder_args.extend_from_slice(&[
                 "-preset".into(),
                 "ultrafast".into(),
@@ -337,7 +342,7 @@ impl CaptureManager {
                 "-maxrate".into(),
                 format!("{}k", bitrate),
                 "-bufsize".into(),
-                format!("{}k", bitrate),
+                format!("{}k", bufsize_k),
                 "-g".into(),
                 gop.to_string(),
                 "-x264-params".into(),

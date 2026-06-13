@@ -13,7 +13,7 @@ const PACKET_TYPE_FRAME: u8 = 1;
 
 /// If more than this many frames are queued for a client, skip ahead to the
 /// most recent IDR instead of letting latency accumulate.
-const MAX_BACKLOG: usize = 4;
+const MAX_BACKLOG: usize = 2;
 
 pub struct StreamConfig {
     pub video_port: u16,

@@ -394,12 +394,31 @@ impl UInputDevice {
                 self.syn()?;
             }
             2 => {
-                // MOVE
+                // MOVE (pressing)
                 self.emit(EV_ABS, ABS_X, x)?;
                 self.emit(EV_ABS, ABS_Y, y)?;
                 self.emit(EV_ABS, ABS_PRESSURE, pressure)?;
                 self.emit(EV_ABS, ABS_TILT_X, tilt_x)?;
                 self.emit(EV_ABS, ABS_TILT_Y, tilt_y)?;
+                self.syn()?;
+            }
+            3 => {
+                // HOVER — pen near screen, cursor follows without clicking.
+                // Requires no INPUT_PROP_DIRECT on the device (we removed it)
+                // so libinput classifies this as a tablet tool in proximity.
+                self.emit(EV_KEY, BTN_TOOL_PEN, 1)?;
+                self.emit(EV_ABS, ABS_X, x)?;
+                self.emit(EV_ABS, ABS_Y, y)?;
+                self.emit(EV_ABS, ABS_PRESSURE, 0)?;
+                self.emit(EV_ABS, ABS_TILT_X, tilt_x)?;
+                self.emit(EV_ABS, ABS_TILT_Y, tilt_y)?;
+                self.syn()?;
+            }
+            4 => {
+                // HOVER_EXIT — pen left proximity
+                self.emit(EV_KEY, BTN_TOUCH, 0)?;
+                self.emit(EV_KEY, BTN_TOOL_PEN, 0)?;
+                self.emit(EV_ABS, ABS_PRESSURE, 0)?;
                 self.syn()?;
             }
             _ => {}
@@ -422,6 +441,42 @@ impl Drop for UInputDevice {
 struct InjectDevices {
     touch: Option<UInputDevice>,
     pen: Option<UInputDevice>,
+    /// Bitmask of MT slots that currently have an active tracking ID
+    /// (DOWN received, no matching UP yet). Bit N → slot N, up to slot 15.
+    active_slots: u16,
+    pen_proximity: bool,
+}
+
+impl InjectDevices {
+    /// Release all active contacts cleanly before the connection closes.
+    /// Without this, a stuck MT slot or a pen left in proximity causes
+    /// the next connection to inherit phantom input events.
+    fn release_all(&mut self) {
+        if let Some(ref mut dev) = self.touch {
+            for slot in 0u8..16 {
+                if self.active_slots & (1u16 << slot) != 0 {
+                    let _ = dev.emit(EV_ABS, ABS_MT_SLOT, slot as i32);
+                    let _ = dev.emit(EV_ABS, ABS_MT_TRACKING_ID, -1);
+                }
+            }
+            if self.active_slots != 0 {
+                let _ = dev.emit(EV_KEY, BTN_TOUCH, 0);
+                let _ = dev.emit(EV_KEY, BTN_TOOL_FINGER, 0);
+                let _ = dev.syn();
+            }
+        }
+        self.active_slots = 0;
+
+        if self.pen_proximity {
+            if let Some(ref mut dev) = self.pen {
+                let _ = dev.emit(EV_KEY, BTN_TOUCH, 0);
+                let _ = dev.emit(EV_KEY, BTN_TOOL_PEN, 0);
+                let _ = dev.emit(EV_ABS, ABS_PRESSURE, 0);
+                let _ = dev.syn();
+            }
+        }
+        self.pen_proximity = false;
+    }
 }
 
 pub struct InputServer {
@@ -536,6 +591,8 @@ async fn handle_connection(
     let uinput = Arc::new(std::sync::Mutex::new(InjectDevices {
         touch: touch_dev,
         pen: pen_dev,
+        active_slots: 0,
+        pen_proximity: false,
     }));
 
     while let Some(msg) = ws_receiver.next().await {
@@ -554,6 +611,13 @@ async fn handle_connection(
             }
             _ => {}
         }
+    }
+
+    // Release any stuck MT slots or pen proximity before the devices are
+    // destroyed — otherwise the kernel keeps the last state and the next
+    // connection inherits a phantom finger/pen that causes infinite scroll.
+    if let Ok(mut guard) = uinput.lock() {
+        guard.release_all();
     }
 
     Ok(())
@@ -577,15 +641,25 @@ fn handle_event(
             let abs_pressure = (pressure * 4096.0) as i32;
 
             if let Ok(mut guard) = uinput.lock() {
-                if let Some(ref mut dev) = guard.touch {
-                    if let Err(e) = dev.inject_touch(abs_x, abs_y, abs_pressure, action, slot) {
-                        warn!("Failed to inject touch: {}", e);
+                let ok = if let Some(ref mut dev) = guard.touch {
+                    match dev.inject_touch(abs_x, abs_y, abs_pressure, action, slot) {
+                        Ok(_) => true,
+                        Err(e) => { warn!("Failed to inject touch: {}", e); false }
                     }
                 } else {
                     match action {
                         0 => info!("Touch DOWN at ({}, {})", abs_x, abs_y),
                         1 => info!("Touch UP   at ({}, {})", abs_x, abs_y),
-                        _ => {} // Don't log MOVE to avoid spam
+                        _ => {}
+                    }
+                    false
+                };
+                if ok {
+                    let bit = 1u16 << (slot.min(15) as u16);
+                    match action {
+                        0 => guard.active_slots |= bit,
+                        1 => guard.active_slots &= !bit,
+                        _ => {}
                     }
                 }
             }
@@ -606,19 +680,23 @@ fn handle_event(
             let tilt_y_deg = ((tilt_y * 57.29578) as i32).clamp(-90, 90);
 
             if let Ok(mut guard) = uinput.lock() {
-                if let Some(ref mut dev) = guard.pen {
-                    if let Err(e) =
-                        dev.inject_pen(abs_x, abs_y, abs_pressure, tilt_x_deg, tilt_y_deg, action)
-                    {
-                        warn!("Failed to inject pen: {}", e);
+                let ok = if let Some(ref mut dev) = guard.pen {
+                    match dev.inject_pen(abs_x, abs_y, abs_pressure, tilt_x_deg, tilt_y_deg, action) {
+                        Ok(_) => true,
+                        Err(e) => { warn!("Failed to inject pen: {}", e); false }
                     }
                 } else {
                     match action {
-                        0 => info!(
-                            "Pen DOWN at ({}, {}), tilt=({:.1},{:.1})",
-                            abs_x, abs_y, tilt_x, tilt_y
-                        ),
+                        0 => info!("Pen DOWN at ({}, {}), tilt=({:.1},{:.1})", abs_x, abs_y, tilt_x, tilt_y),
                         1 => info!("Pen UP   at ({}, {})", abs_x, abs_y),
+                        _ => {}
+                    }
+                    false
+                };
+                if ok {
+                    match action {
+                        0 | 3 => guard.pen_proximity = true,
+                        1 | 4 => guard.pen_proximity = false,
                         _ => {}
                     }
                 }

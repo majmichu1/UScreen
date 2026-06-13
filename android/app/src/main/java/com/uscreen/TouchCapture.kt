@@ -79,6 +79,25 @@ class TouchCapture {
             handleMotionEvent(event, view.width, view.height)
             true
         }
+
+        // S-Pen hover: pen near screen moves cursor without clicking.
+        // Without this, the first touch always snaps the cursor to the pen
+        // position and fires a click simultaneously (jarring).
+        sv.setOnHoverListener { view, event ->
+            if (!isConnected) return@setOnHoverListener false
+            val vw = view.width.coerceAtLeast(1).toFloat()
+            val vh = view.height.coerceAtLeast(1).toFloat()
+            when (event.actionMasked) {
+                MotionEvent.ACTION_HOVER_ENTER,
+                MotionEvent.ACTION_HOVER_MOVE -> {
+                    if (isStylus(event, 0)) sendPenEvent(event, 0, 3, vw, vh)
+                }
+                MotionEvent.ACTION_HOVER_EXIT -> {
+                    if (isStylus(event, 0)) sendPenProximityExit()
+                }
+            }
+            true
+        }
     }
 
     fun connect() {
@@ -115,8 +134,13 @@ class TouchCapture {
         when (maskedAction) {
             MotionEvent.ACTION_DOWN,
             MotionEvent.ACTION_POINTER_DOWN -> {
-                val isStylus = isStylus(event, actionIndex)
-                if (isStylus) {
+                // Drop palm contacts — Samsung sends TOOL_TYPE_PALM for
+                // unintentional palm-rest touches; forwarding them causes
+                // phantom scrolling on the Linux side.
+                if (event.getToolType(actionIndex) == 6 /* TOOL_TYPE_PALM, API 29+ */) {
+                    return true
+                }
+                if (isStylus(event, actionIndex)) {
                     sendPenEvent(event, actionIndex, 0, vw, vh)
                 } else {
                     sendTouch(event.getX(actionIndex) / vw,
@@ -128,8 +152,8 @@ class TouchCapture {
 
             MotionEvent.ACTION_MOVE -> {
                 for (i in 0 until pointerCount) {
-                    val isStylus = isStylus(event, i)
-                    if (isStylus) {
+                    if (event.getToolType(i) == 6 /* TOOL_TYPE_PALM, API 29+ */) continue
+                    if (isStylus(event, i)) {
                         sendPenEvent(event, i, 2, vw, vh)
                     } else {
                         sendTouch(event.getX(i) / vw,
@@ -142,8 +166,10 @@ class TouchCapture {
 
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_POINTER_UP -> {
-                val isStylus = isStylus(event, actionIndex)
-                if (isStylus) {
+                if (event.getToolType(actionIndex) == 6 /* TOOL_TYPE_PALM, API 29+ */) {
+                    return true
+                }
+                if (isStylus(event, actionIndex)) {
                     sendPenEvent(event, actionIndex, 1, vw, vh)
                 } else {
                     sendTouch(event.getX(actionIndex) / vw,
@@ -154,6 +180,7 @@ class TouchCapture {
 
             MotionEvent.ACTION_CANCEL -> {
                 for (i in 0 until pointerCount) {
+                    if (event.getToolType(i) == 6 /* TOOL_TYPE_PALM, API 29+ */) continue
                     sendTouch(event.getX(i) / vw,
                         event.getY(i) / vh,
                         0.0, 1, i)
@@ -194,6 +221,19 @@ class TouchCapture {
             put("tilt_x", tiltX)
             put("tilt_y", tiltY)
             put("action", action)
+        }
+        webSocket?.send(msg.toString())
+    }
+
+    private fun sendPenProximityExit() {
+        val msg = JSONObject().apply {
+            put("type", "pen")
+            put("x", 0.0)
+            put("y", 0.0)
+            put("pressure", 0.0)
+            put("tilt_x", 0.0)
+            put("tilt_y", 0.0)
+            put("action", 4) // HOVER_EXIT / pen left proximity
         }
         webSocket?.send(msg.toString())
     }
