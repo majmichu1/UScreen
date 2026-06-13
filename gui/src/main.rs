@@ -418,7 +418,7 @@ impl eframe::App for App {
                     ui.horizontal(|ui| {
                         let mut mbps = self.cfg.bitrate as f32 / 1000.0;
                         if ui
-                            .add(egui::Slider::new(&mut mbps, 5.0..=50.0).suffix(" Mbps"))
+                            .add(egui::Slider::new(&mut mbps, 5.0..=200.0).suffix(" Mbps"))
                             .changed()
                         {
                             self.cfg.bitrate = (mbps * 1000.0) as u32;

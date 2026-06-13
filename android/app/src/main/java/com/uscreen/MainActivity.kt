@@ -395,12 +395,12 @@ private fun SettingsSheet(
             Slider(
                 value = bitrateMbps,
                 onValueChange = { bitrateMbps = it },
-                valueRange = 5f..50f,
-                steps = 44,
+                valueRange = 5f..200f,
+                steps = 38,
                 colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent)
             )
             Text(
-                "Higher = sharper image, lower = smoother on slow USB",
+                "USB 3.1 Gen 2 supports up to ~200 Mbps. Higher = sharper, lower = smoother on slower cables.",
                 fontSize = 11.sp,
                 color = Color(0xFF6A6A7E)
             )
@@ -409,7 +409,7 @@ private fun SettingsSheet(
             Text("Frame rate", fontSize = 14.sp, color = Color(0xFFB0B0C0))
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(30, 60).forEach { f ->
+                listOf(30, 60, 90, 120).forEach { f ->
                     FilterChip(
                         selected = fpsChoice == f,
                         onClick = { fpsChoice = f },

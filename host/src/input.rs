@@ -206,7 +206,11 @@ impl UInputDevice {
         Ok(Self { file })
     }
 
-    /// Pen tablet device: stylus tool + pressure + tilt, INPUT_PROP_DIRECT.
+    /// Pen tablet device: stylus tool + pressure + tilt.
+    /// No INPUT_PROP_DIRECT — that flag means "touchscreen" and causes KDE to
+    /// activate the on-screen keyboard on every pen tap. Without it, libinput
+    /// classifies this as a tablet tool (Wacom-style): the cursor follows the
+    /// pen position and clicks work as mouse clicks.
     fn new_pen(name: &str) -> Result<Self> {
         let file = Self::open_uinput()?;
         let fd = file.as_raw_fd();
@@ -217,7 +221,6 @@ impl UInputDevice {
             Self::ioctl_val(fd, UI_SET_EVBIT, EV_SYN as i32)?;
             Self::ioctl_val(fd, UI_SET_EVBIT, EV_KEY as i32)?;
             Self::ioctl_val(fd, UI_SET_EVBIT, EV_ABS as i32)?;
-            Self::ioctl_val(fd, UI_SET_PROPBIT, INPUT_PROP_DIRECT)?;
 
             Self::ioctl_val(fd, UI_SET_KEYBIT, BTN_TOUCH as i32)?;
             Self::ioctl_val(fd, UI_SET_KEYBIT, BTN_TOOL_PEN as i32)?;
@@ -651,7 +654,7 @@ fn handle_event(
             };
             let mut new = tx.borrow().clone();
             if let Some(b) = bitrate {
-                new.bitrate = b.clamp(1000, 100_000);
+                new.bitrate = b.clamp(1000, 200_000);
             }
             if let Some(f) = fps {
                 new.fps = f.clamp(10, 120);
