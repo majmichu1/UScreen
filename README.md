@@ -166,6 +166,19 @@ feature encodes through libavcodec instead, removing that process boundary:
 cargo build --release --features inproc-encoder
 ```
 
+Measured on a Tab S9 Ultra at 2960x1848, same settings both ways:
+
+| | ffmpeg process | in-process |
+|---|---|---|
+| Latency p50 | 22.2-23.1 ms | 22.0-22.9 ms |
+| Pipeline CPU | ~188% | **~97%** |
+
+Latency is unchanged, and that is expected: the budget is dominated by the
+tablet's decoder (~15 ms) and the USB hop (~7 ms), neither of which the encoder
+sits in front of. What it buys is roughly a whole CPU core back, and the ability
+to ask for a keyframe on demand — so a client attaching to a mostly-static
+screen gets a picture at once instead of waiting for the scheduled one.
+
 It needs the ffmpeg development headers (`ffmpeg-devel` on Fedora,
 `libavcodec-dev libavformat-dev libavutil-dev` on Debian/Ubuntu). On atomic
 distributions such as Bazzite or Silverblue, where layering development
