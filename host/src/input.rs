@@ -37,6 +37,7 @@ const ABS_TILT_X: u16 = 0x1a;
 const ABS_TILT_Y: u16 = 0x1b;
 
 const BTN_STYLUS: u16 = 0x14b;
+const BTN_LEFT: u16 = 0x110;
 
 // uinput ioctl constants (modern UI_DEV_SETUP/UI_ABS_SETUP API — the legacy
 // uinput_user_dev write() API cannot declare axis resolution, which makes
@@ -64,8 +65,10 @@ const COORD_MAX: i32 = 65535;
 const UINPUT_VENDOR: u16 = 0x4553;
 const PRODUCT_TOUCH: u16 = 0x0001;
 const PRODUCT_PEN: u16 = 0x0002;
+const PRODUCT_POINTER: u16 = 0x0003;
 const TOUCH_DEVICE_NAME: &str = "UScreen Touch";
 const PEN_DEVICE_NAME: &str = "UScreen Pen";
+const POINTER_DEVICE_NAME: &str = "UScreen Pointer";
 /// ~310mm wide active area → 65535/310 ≈ 211 units/mm.
 /// libinput requires a resolution on touchscreen/tablet axes.
 const RESOLUTION_UNITS_PER_MM: i32 = 211;
@@ -280,6 +283,36 @@ impl UInputDevice {
         }
 
         info!("uinput pen tablet '{}' created", name);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        Ok(Self { file })
+    }
+
+    /// An absolute-positioning pointer, the same shape as a VM's virtual
+    /// tablet. It exists for one reason: a tablet tool's cursor is hidden the
+    /// moment the tool leaves proximity, which is correct for a Wacom on a desk
+    /// but wrong here — lift the pen and you lose all sense of where you were
+    /// pointing. Parking this pointer at the last pen position leaves an
+    /// ordinary mouse cursor sitting there.
+    ///
+    /// No INPUT_PROP_DIRECT (that would make it a touchscreen and bring the
+    /// on-screen keyboard with it) and no BTN_TOOL_PEN (that would make it a
+    /// second tablet).
+    fn new_pointer(name: &str) -> Result<Self> {
+        let file = Self::open_uinput()?;
+        let fd = file.as_raw_fd();
+        let w = COORD_MAX + 1;
+
+        unsafe {
+            Self::ioctl_val(fd, UI_SET_EVBIT, EV_SYN as i32)?;
+            Self::ioctl_val(fd, UI_SET_EVBIT, EV_KEY as i32)?;
+            Self::ioctl_val(fd, UI_SET_EVBIT, EV_ABS as i32)?;
+            Self::ioctl_val(fd, UI_SET_KEYBIT, BTN_LEFT as i32)?;
+            Self::abs_setup(fd, ABS_X, 0, w - 1, RESOLUTION_UNITS_PER_MM)?;
+            Self::abs_setup(fd, ABS_Y, 0, w - 1, RESOLUTION_UNITS_PER_MM)?;
+            Self::dev_setup_and_create(fd, name, PRODUCT_POINTER)?;
+        }
+
+        info!("uinput pointer '{}' created", name);
         std::thread::sleep(std::time::Duration::from_millis(200));
         Ok(Self { file })
     }
@@ -506,6 +539,10 @@ impl Drop for UInputDevice {
 struct InjectDevices {
     touch: Option<UInputDevice>,
     pen: Option<UInputDevice>,
+    /// Takes over the cursor when the pen leaves proximity, so it stays where
+    /// the user last pointed instead of vanishing.
+    pointer: Option<UInputDevice>,
+    last_pen_pos: (i32, i32),
     /// Bitmask of MT slots that currently have an active tracking ID
     /// (DOWN received, no matching UP yet). Bit N → slot N, up to slot 15.
     active_slots: u16,
@@ -678,7 +715,10 @@ async fn map_devices_to_output(pen_only: bool) {
             let Some(name) = kwin_device_property(&sysname, "name").await else {
                 continue;
             };
-            if name != TOUCH_DEVICE_NAME && name != PEN_DEVICE_NAME {
+            if name != TOUCH_DEVICE_NAME
+                && name != PEN_DEVICE_NAME
+                && name != POINTER_DEVICE_NAME
+            {
                 continue;
             }
             let r = tokio::process::Command::new("qdbus")
@@ -707,7 +747,7 @@ async fn map_devices_to_output(pen_only: bool) {
             }
         }
 
-        if mapped >= 2 {
+        if mapped >= 3 {
             return;
         }
     }
@@ -771,9 +811,18 @@ impl InputServer {
                     None
                 }
             };
+            let pointer = match UInputDevice::new_pointer(POINTER_DEVICE_NAME) {
+                Ok(dev) => Some(dev),
+                Err(e) => {
+                    warn!("No pointer device: {}. The cursor will vanish when the pen lifts.", e);
+                    None
+                }
+            };
             InjectDevices {
                 touch,
                 pen,
+                pointer,
+                last_pen_pos: (0, 0),
                 active_slots: 0,
                 pen_proximity: false,
                 pen_button: false,
@@ -783,6 +832,8 @@ impl InputServer {
         .unwrap_or(InjectDevices {
             touch: None,
             pen: None,
+            pointer: None,
+            last_pen_pos: (0, 0),
             active_slots: 0,
             pen_proximity: false,
             pen_button: false,
@@ -888,6 +939,33 @@ async fn handle_connection(
     Ok(())
 }
 
+/// Counts of pen actions received, logged periodically. Hover in particular is
+/// easy to lose somewhere between the tablet's view hierarchy and here, and
+/// without a count there is no way to tell "not sent" from "sent but ignored".
+static PEN_ACTIONS: std::sync::Mutex<[u32; 8]> = std::sync::Mutex::new([0; 8]);
+static PEN_LOG_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+fn note_pen_action(action: u8) {
+    if let Ok(mut c) = PEN_ACTIONS.lock() {
+        c[(action as usize).min(7)] += 1;
+    }
+    let Ok(mut last) = PEN_LOG_AT.lock() else { return };
+    let now = std::time::Instant::now();
+    match *last {
+        Some(t) if t.elapsed().as_secs() < 3 => return,
+        _ => *last = Some(now),
+    }
+    if let Ok(mut c) = PEN_ACTIONS.lock() {
+        if c.iter().any(|&n| n > 0) {
+            info!(
+                "Pen events: down={} up={} move={} hover={} hover_exit={} btn_down={} btn_up={}",
+                c[0], c[1], c[2], c[3], c[4], c[5], c[6]
+            );
+            *c = [0; 8];
+        }
+    }
+}
+
 fn handle_event(
     event: InputEvent,
     uinput: &Arc<std::sync::Mutex<InjectDevices>>,
@@ -941,6 +1019,7 @@ fn handle_event(
         } => {
             let abs_x = (x * COORD_MAX as f64) as i32;
             let abs_y = (y * COORD_MAX as f64) as i32;
+            note_pen_action(action);
             let abs_pressure = (pressure * 4096.0) as i32;
             // Already degrees, as the tablet computes them. This used to
             // multiply by 180/π on the assumption they were radians, which
@@ -963,6 +1042,20 @@ fn handle_event(
                     false
                 };
                 if ok {
+                    if matches!(action, 0 | 2 | 3) {
+                        guard.last_pen_pos = (abs_x, abs_y);
+                    }
+                    // Leaving proximity hides the tablet cursor, so hand the
+                    // position to the plain pointer and let an ordinary cursor
+                    // stay where the pen last was.
+                    if action == 4 {
+                        let (px, py) = guard.last_pen_pos;
+                        if let Some(ref mut dev) = guard.pointer {
+                            let _ = dev.emit(EV_ABS, ABS_X, px);
+                            let _ = dev.emit(EV_ABS, ABS_Y, py);
+                            let _ = dev.syn();
+                        }
+                    }
                     match action {
                         0 | 3 => guard.pen_proximity = true,
                         1 | 4 => guard.pen_proximity = false,

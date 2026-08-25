@@ -6,6 +6,7 @@ mod edid;
 mod encoder;
 mod input;
 mod latency;
+mod osk;
 mod stream;
 mod vdisplay;
 
@@ -229,6 +230,10 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     // the stream server actually gets a chance to run.
     let (video_tx, _) = broadcast::channel(8);
 
+    // The tablet is a touchscreen as far as the desktop is concerned, so the
+    // virtual keyboard would pop up over the screen being used as a monitor.
+    osk::disable().await;
+
     info!("=== uscreen daemon starting ===");
     info!("  Resolution: {}x{} @ {}fps", width, height, fps);
     info!("  Encoder: {}", encoder);
@@ -355,6 +360,8 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     {
         warn!("Capture pipeline did not stop within 5s");
     }
+
+    osk::restore().await;
 
     stream_handle.abort();
     input_handle.abort();

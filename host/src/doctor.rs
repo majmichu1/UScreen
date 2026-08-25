@@ -386,6 +386,36 @@ async fn check_virtual_display(r: &mut Report, cfg: &FileConfig) {
     }
 }
 
+/// The on-screen keyboard pops up whenever a touchscreen is used, and the
+/// tablet's touch device is exactly that as far as the desktop is concerned.
+/// Reported because it is a global desktop setting, not something the daemon
+/// should quietly decide on the user's behalf.
+async fn check_osk(r: &mut Report) {
+    let Some(mode) = output_of(
+        "kreadconfig6",
+        &["--file", "kwinrc", "--group", "Wayland", "--key", "VirtualKeyboardMode"],
+    )
+    .await
+    else {
+        return;
+    };
+    match mode.trim() {
+        "1" | "2" => {
+            r.line(
+                Level::Warn,
+                "on-screen keyboard",
+                "pops up on touch input",
+            );
+            r.hint(
+                "kwriteconfig6 --file kwinrc --group Wayland --key VirtualKeyboardMode 0 \
+                 (0 = only when you ask for it; undo with 1)",
+            );
+        }
+        "0" => r.line(Level::Ok, "on-screen keyboard", "only when asked for"),
+        _ => {}
+    }
+}
+
 /// Whether plugging the cable in is actually enough on its own.
 async fn check_autostart(r: &mut Report) {
     match output_of("systemctl", &["--user", "is-enabled", "uscreen.service"]).await {
@@ -556,6 +586,9 @@ pub async fn run() -> Result<()> {
 
     section("Autostart");
     check_autostart(&mut r).await;
+
+    section("Desktop");
+    check_osk(&mut r).await;
 
     section("Colour");
     check_colour(&mut r).await;

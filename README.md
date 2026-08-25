@@ -120,6 +120,14 @@ Settings live in `~/.config/uscreen/config.toml` and can be changed from three p
 - **The tablet app** — tap the ⚙ handle in the top-right corner; bitrate and fps apply live
 - **CLI flags** — override the config file for one run (e.g. `uscreen --bitrate 30000 start`)
 
+### On-screen keyboard
+
+The tablet's touch device is a real touchscreen as far as the desktop is
+concerned, so KDE would pop its virtual keyboard up over whatever you are
+working on. The daemon turns it off while it runs and puts the setting back on
+exit — including after being killed rather than stopped, since the previous
+value is saved to disk rather than kept in memory.
+
 ### Graphics tablet mode
 
 With `pen_only` (a checkbox in `uscreen-gui`, or `--pen-only`) the tablet stops
