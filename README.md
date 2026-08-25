@@ -172,7 +172,7 @@ COMMANDS:
   stop            Stop the uscreen daemon
   status          Show daemon status
   list-displays   List available displays
-  setup-vdisplay  Setup virtual display via EVDI
+  doctor          Diagnose the setup and report what is wrong
 
 OPTIONS (all default to ~/.config/uscreen/config.toml):
   --encoder <ENCODER>     H.264 encoder: h264_nvenc, h264_vaapi, libx264
@@ -182,6 +182,7 @@ OPTIONS (all default to ~/.config/uscreen/config.toml):
   --height <HEIGHT>       Capture height
   --video-port <PORT>     Video stream port
   --input-port <PORT>     Input WebSocket port
+  --quality <Q>           Constant-quality target (12-32, lower = sharper)
   --helper <PATH>         Path to evdi_helper binary
   --edid <PATH>           Path to EDID binary
 ```
@@ -197,7 +198,9 @@ uscreen/
 │   │   ├── stream.rs  # TCP video server, IDR-aware backlog skipping
 │   │   ├── input.rs   # WebSocket input server + uinput injection + config channel
 │   │   ├── config.rs  # ~/.config/uscreen/config.toml
-│   │   └── vdisplay.rs # Virtual display manager
+│   │   ├── latency.rs # End-to-end latency measurement
+│   │   ├── doctor.rs  # `uscreen doctor` diagnostics
+│   │   └── vdisplay.rs # EVDI discovery via sysfs
 │   ├── evdi/          # C helper for EVDI framebuffer capture
 │   └── Cargo.toml
 ├── gui/               # Linux desktop GUI (egui): status, start/stop, settings
@@ -212,16 +215,20 @@ uscreen/
 │   ├── install.sh     # Dependency installer
 │   ├── gen-edid.py    # EDID generator for custom resolutions
 │   ├── uscreen.desktop    # App menu entry for the GUI
-│   ├── uscreen.service    # systemd user service
-│   └── 51-uscreen.rules   # udev rules for auto-detection
+│   └── uscreen.service    # systemd user service
 └── Makefile
 ```
 
 ## Protocol
 
-### Video Stream (TCP 8890)
-- **Length-prefixed frames**: Each frame has a 4-byte big-endian length prefix followed by raw H.264 data
-- The first frame sent to new clients contains **SPS+PPS** codec configuration
+### Video Stream (TCP 8890, loopback only)
+- **Length-prefixed packets**: 4-byte big-endian length, then a 1-byte type
+  (`0` = codec config, `1` = frame)
+- Frame packets carry a 4-byte big-endian sequence number before the payload.
+  The tablet passes it through the decoder as the presentation timestamp and
+  echoes it back on the input socket once the frame is on screen, which is how
+  end-to-end latency is measured on a single clock.
+- The first packet sent to a new client contains **SPS+PPS** codec configuration
 - Frame data is in Annex B format (with start codes)
 
 ### Input Stream (WebSocket 8891)
@@ -274,7 +281,10 @@ sudo modprobe evdi
 - [x] Linux GUI (uscreen-gui) with status and settings
 - [x] Android settings UI (bitrate/fps applied live)
 - [x] Persistent config (~/.config/uscreen/config.toml)
-- [ ] Auto-create virtual display at tablet resolution
+- [x] Auto-create virtual display at tablet resolution
+- [x] Touch/S-Pen mapped to the virtual display, not the whole desktop
+- [x] `uscreen doctor` diagnostics
+- [x] End-to-end latency measurement
 - [ ] System tray icon
 - [ ] Wi-Fi mode (fallback)
 - [ ] Multi-monitor support

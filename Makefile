@@ -1,6 +1,6 @@
 .PHONY: all build build-helper install clean run android adb edid status stop list dist setup-system
 
-VERSION = 0.2.0
+VERSION = 0.3.0
 
 CARGO = cargo
 CC = gcc
@@ -86,7 +86,7 @@ dist: build
 	rm -rf dist/uscreen-$(VERSION)
 	mkdir -p dist/uscreen-$(VERSION)/bin dist/uscreen-$(VERSION)/scripts
 	cp target/release/uscreen target/release/uscreen-gui host/evdi/evdi_helper dist/uscreen-$(VERSION)/bin/
-	cp scripts/install.sh scripts/uscreen.desktop scripts/uscreen.service scripts/51-uscreen.rules dist/uscreen-$(VERSION)/scripts/
+	cp scripts/install.sh scripts/uscreen.desktop scripts/uscreen.service dist/uscreen-$(VERSION)/scripts/
 	cp README.md dist/uscreen-$(VERSION)/
 	cd android && ./gradlew assembleRelease -q && cp app/build/outputs/apk/release/app-release.apk ../dist/uscreen-$(VERSION)/uscreen.apk 2>/dev/null || true
 	tar -C dist -czf dist/uscreen-$(VERSION)-linux-x86_64.tar.gz uscreen-$(VERSION)
