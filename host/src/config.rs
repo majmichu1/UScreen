@@ -46,6 +46,11 @@ pub struct FileConfig {
     /// encoder runs in constant-quality mode — the bitrate is only a ceiling
     /// for bursts, and on a desktop the stream sits far below it.
     pub quality: u32,
+    /// Integer downscale for the stream only; the desktop keeps its native
+    /// mode. 1 = native, 2 = half. Trades sharpness for latency: the tablet's
+    /// decoder costs roughly 7-8ms fixed plus 1.2ms per megapixel, so fewer
+    /// pixels arrive on screen sooner.
+    pub stream_scale: u32,
     /// Match the virtual display to whatever resolution the tablet reports
     pub auto_resolution: bool,
     pub video_port: u16,
@@ -63,6 +68,7 @@ impl Default for FileConfig {
             width: 2960,
             height: 1848,
             quality: DEFAULT_QUALITY,
+            stream_scale: 1,
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,
@@ -112,6 +118,7 @@ impl FileConfig {
         }
 
         self.quality = self.quality.clamp(MIN_QUALITY, MAX_QUALITY);
+        self.stream_scale = self.stream_scale.clamp(1, 4);
         self.width = self.width.clamp(640, 8192);
         self.height = self.height.clamp(480, 8192);
     }

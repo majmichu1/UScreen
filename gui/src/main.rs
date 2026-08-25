@@ -17,6 +17,7 @@ struct FileConfig {
     width: u32,
     height: u32,
     quality: u32,
+    stream_scale: u32,
     auto_resolution: bool,
     video_port: u16,
     input_port: u16,
@@ -32,6 +33,7 @@ impl Default for FileConfig {
             width: 2960,
             height: 1848,
             quality: DEFAULT_QUALITY,
+            stream_scale: 1,
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,
@@ -67,6 +69,7 @@ impl FileConfig {
         cfg.bitrate = cfg.bitrate.clamp(MIN_BITRATE_KBPS, MAX_BITRATE_KBPS);
         cfg.fps = cfg.fps.clamp(MIN_FPS, MAX_FPS);
         cfg.quality = cfg.quality.clamp(MIN_QUALITY, MAX_QUALITY);
+        cfg.stream_scale = cfg.stream_scale.clamp(1, 4);
         cfg
     }
 
@@ -266,6 +269,13 @@ impl App {
             }
             Err(e) => self.message = format!("Save failed: {}", e),
         }
+    }
+}
+
+fn scale_label(n: u32) -> &'static str {
+    match n {
+        3 => "Third — very soft",
+        _ => "Quarter — very soft",
     }
 }
 
@@ -527,6 +537,32 @@ impl eframe::App for App {
                                 .size(11.0),
                             );
                         }
+                    });
+                    ui.end_row();
+
+                    ui.label("Stream detail");
+                    ui.vertical(|ui| {
+                        egui::ComboBox::from_id_salt("stream_scale")
+                            .selected_text(match self.cfg.stream_scale {
+                                1 => "Full — sharpest",
+                                2 => "Half — lowest latency",
+                                n => scale_label(n),
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut self.cfg.stream_scale, 1,
+                                    "Full — sharpest");
+                                ui.selectable_value(&mut self.cfg.stream_scale, 2,
+                                    "Half — lowest latency");
+                            });
+                        ui.label(
+                            egui::RichText::new(
+                                "The desktop keeps its full resolution either way. Half sends \
+                                 a quarter of the pixels, which the tablet decodes sooner — \
+                                 good for games, softer for text.",
+                            )
+                            .weak()
+                            .size(11.0),
+                        );
                     });
                     ui.end_row();
 

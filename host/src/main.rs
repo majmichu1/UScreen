@@ -57,6 +57,10 @@ struct Cli {
     #[arg(long = "quality")]
     quality: Option<u32>,
 
+    /// Integer downscale for the stream only; the desktop keeps its native mode.
+    #[arg(long = "stream-scale")]
+    stream_scale: Option<u32>,
+
     #[arg(long = "video-port")]
     video_port: Option<u16>,
 
@@ -163,6 +167,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     let video_port = cli.video_port.unwrap_or(file_cfg.video_port);
     let input_port = cli.input_port.unwrap_or(file_cfg.input_port);
     let quality = cli.quality.unwrap_or(file_cfg.quality);
+    let stream_scale = cli.stream_scale.unwrap_or(file_cfg.stream_scale);
 
     let cap_config = capture::CaptureConfig {
         helper_path: find_helper(&cli.helper),
@@ -176,6 +181,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         // Replaced as soon as the tablet reports its real panel size.
         width_mm: edid::DEFAULT_WIDTH_MM,
         height_mm: edid::DEFAULT_HEIGHT_MM,
+        stream_scale,
     };
 
     let stream_config = stream::StreamConfig { video_port };
@@ -197,6 +203,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         quality,
         width_mm: edid::DEFAULT_WIDTH_MM,
         height_mm: edid::DEFAULT_HEIGHT_MM,
+        stream_scale,
     });
 
     let mut capture_mgr = capture::CaptureManager::new(cap_config);
@@ -264,6 +271,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
             cfg.width = s.width;
             cfg.height = s.height;
             cfg.quality = s.quality;
+            cfg.stream_scale = s.stream_scale;
             if let Err(e) = cfg.save() {
                 warn!("Failed to persist settings: {}", e);
             } else {

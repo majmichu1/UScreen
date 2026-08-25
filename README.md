@@ -117,6 +117,14 @@ Settings live in `~/.config/uscreen/config.toml` and can be changed from three p
 - **The tablet app** — tap the ⚙ handle in the top-right corner; bitrate and fps apply live
 - **CLI flags** — override the config file for one run (e.g. `uscreen --bitrate 30000 start`)
 
+### Stream detail vs latency
+
+The desktop always runs at full resolution. `stream_scale` controls only what
+is sent to the tablet: at `2` a quarter of the pixels are transmitted and the
+tablet upscales them by a whole number. The tablet's decoder costs roughly
+7-8 ms fixed plus 1.2 ms per megapixel, so fewer pixels reach the screen
+sooner — worth it for games, softer for text.
+
 ### Resolution
 
 By default `auto_resolution = true`: the tablet app reports its native screen
@@ -183,6 +191,7 @@ OPTIONS (all default to ~/.config/uscreen/config.toml):
   --video-port <PORT>     Video stream port
   --input-port <PORT>     Input WebSocket port
   --quality <Q>           Constant-quality target (12-32, lower = sharper)
+  --stream-scale <N>      Downscale the stream only (1 = native, 2 = half)
   --helper <PATH>         Path to evdi_helper binary
   --edid <PATH>           Path to EDID binary
 ```

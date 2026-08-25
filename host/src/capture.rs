@@ -47,6 +47,8 @@ pub struct EncoderSettings {
     /// Physical panel size for the generated EDID, in millimetres.
     pub width_mm: u32,
     pub height_mm: u32,
+    /// Integer downscale for the stream; see `config::FileConfig::stream_scale`.
+    pub stream_scale: u32,
 }
 
 pub struct CaptureConfig {
@@ -61,6 +63,7 @@ pub struct CaptureConfig {
     pub quality: u32,
     pub width_mm: u32,
     pub height_mm: u32,
+    pub stream_scale: u32,
 }
 
 impl Default for CaptureConfig {
@@ -76,6 +79,7 @@ impl Default for CaptureConfig {
             quality: crate::config::DEFAULT_QUALITY,
             width_mm: crate::edid::DEFAULT_WIDTH_MM,
             height_mm: crate::edid::DEFAULT_HEIGHT_MM,
+            stream_scale: 1,
         }
     }
 }
@@ -103,6 +107,11 @@ pub struct CaptureManager {
     /// because the helper's stdout was closed right after the handshake.
     mode_tx: watch::Sender<Option<DetectedMode>>,
     mode_rx: watch::Receiver<Option<DetectedMode>>,
+    /// Frame size the helper actually emits. Differs from the display mode
+    /// whenever the stream is downscaled, and it is this — not the mode — that
+    /// the encoder must be configured for.
+    stream_tx: watch::Sender<Option<(u32, u32)>>,
+    stream_rx: watch::Receiver<Option<(u32, u32)>>,
     helper_stdout_task: Option<tokio::task::JoinHandle<()>>,
     /// DRM card index the running helper attached to, used to address the
     /// virtual output unambiguously.
@@ -113,6 +122,7 @@ pub struct CaptureManager {
 impl CaptureManager {
     pub fn new(config: CaptureConfig) -> Self {
         let (mode_tx, mode_rx) = watch::channel(None);
+        let (stream_tx, stream_rx) = watch::channel(None);
         Self {
             config,
             helper_child: None,
@@ -120,6 +130,8 @@ impl CaptureManager {
             codec_config: Arc::new(Mutex::new(None)),
             mode_tx,
             mode_rx,
+            stream_tx,
+            stream_rx,
             helper_stdout_task: None,
             helper_card: None,
             latency: crate::latency::LatencyTracker::new(),
@@ -136,14 +148,23 @@ impl CaptureManager {
         self.codec_config.clone()
     }
 
-    /// Frame size the encoder must be configured for: whatever the compositor
-    /// actually negotiated, falling back to the requested mode until the
-    /// helper has reported one.
+    /// Frame size the encoder must be configured for.
+    ///
+    /// This is what the helper emits, which is the negotiated display mode
+    /// divided by the stream scale — not the mode itself. Getting it wrong
+    /// skews every frame for the whole session.
     fn active_mode(&self) -> (u32, u32) {
-        match *self.mode_rx.borrow() {
+        if let Some((w, h)) = *self.stream_rx.borrow() {
+            if w > 0 && h > 0 {
+                return (w, h);
+            }
+        }
+        let (w, h) = match *self.mode_rx.borrow() {
             Some(m) if m.width > 0 && m.height > 0 => (m.width, m.height),
             _ => (self.config.width, self.config.height),
-        }
+        };
+        let n = self.config.stream_scale.max(1);
+        (((w / n) & !1).max(2), ((h / n) & !1).max(2))
     }
 
     fn ensure_fifo(path: &str) -> Result<()> {
@@ -381,6 +402,9 @@ impl CaptureManager {
         let mut cmd = Command::new(&self.config.helper_path);
         cmd.args(["--edid", &edid_path.to_string_lossy()]);
         cmd.args(["--fps", &self.config.fps.to_string()]);
+        if self.config.stream_scale > 1 {
+            cmd.args(["--scale", &self.config.stream_scale.to_string()]);
+        }
 
         cmd.args(["--capture-fifo", FIFO_PATH]);
 
@@ -421,6 +445,7 @@ impl CaptureManager {
         self.helper_card = Some(card);
         // A fresh helper has not negotiated a mode yet.
         let _ = self.mode_tx.send(None);
+        let _ = self.stream_tx.send(None);
 
         // Keep draining stdout for the life of the helper. Dropping the reader
         // here (as this code used to) closes the pipe, so every later
@@ -430,8 +455,21 @@ impl CaptureManager {
             task.abort();
         }
         let mode_tx = self.mode_tx.clone();
+        let stream_tx = self.stream_tx.clone();
         self.helper_stdout_task = Some(tokio::spawn(async move {
             while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(rest) = line.strip_prefix("STREAM_SIZE ") {
+                    let mut p = rest.split_whitespace();
+                    if let (Some(Ok(w)), Some(Ok(h))) =
+                        (p.next().map(str::parse::<u32>), p.next().map(str::parse::<u32>))
+                    {
+                        if w > 0 && h > 0 {
+                            info!("Helper emits {}x{} frames to the encoder", w, h);
+                            let _ = stream_tx.send(Some((w, h)));
+                        }
+                    }
+                    continue;
+                }
                 let Some(rest) = line.strip_prefix("MODE_CHANGED ") else {
                     continue;
                 };
@@ -469,14 +507,23 @@ impl CaptureManager {
         } else {
             self.config.encoder.clone()
         };
-        // Always the mode the compositor really drives, never the one we asked
-        // for: a mismatch here shows up as a permanently skewed picture.
+        // Always the size the helper really emits, never the one we asked for:
+        // a mismatch here shows up as a permanently skewed picture.
         let (w, h) = self.active_mode();
-        if (w, h) != (self.config.width, self.config.height) {
+        let n = self.config.stream_scale.max(1);
+        let expected = (
+            ((self.config.width / n) & !1).max(2),
+            ((self.config.height / n) & !1).max(2),
+        );
+        if (w, h) != expected {
             warn!(
-                "Encoding at {}x{} — compositor did not honour the requested {}x{}",
-                w, h, self.config.width, self.config.height
+                "Encoding at {}x{}, expected {}x{} — the compositor did not honour \
+                 the requested mode",
+                w, h, expected.0, expected.1
             );
+        } else if n > 1 {
+            info!("Encoding at {}x{} (desktop {}x{}, stream scale {})",
+                  w, h, self.config.width, self.config.height, n);
         }
         let fps = self.config.fps;
         let bitrate = self.config.bitrate;
@@ -645,6 +692,7 @@ impl CaptureManager {
         let mut backoff_ms: u64 = RECONNECT_DELAY_MS;
         let mut pipeline_started_at = Instant::now();
         let mut mode_rx = self.mode_rx.clone();
+        let mut stream_rx = self.stream_rx.clone();
         // Frame size the running encoder was configured for, so a later mode
         // change can be detected as a mismatch rather than silently skewing.
         let mut encoder_mode: Option<(u32, u32)> = None;
@@ -659,7 +707,8 @@ impl CaptureManager {
                     || s.width != self.config.width
                     || s.height != self.config.height
                     || s.width_mm != self.config.width_mm
-                    || s.height_mm != self.config.height_mm)
+                    || s.height_mm != self.config.height_mm
+                    || s.stream_scale != self.config.stream_scale)
                     && self.helper_child.is_some();
                 if needs_helper_restart {
                     // fps is baked into the helper's pacing, and the
@@ -683,6 +732,7 @@ impl CaptureManager {
                 self.config.quality = s.quality;
                 self.config.width_mm = s.width_mm;
                 self.config.height_mm = s.height_mm;
+                self.config.stream_scale = s.stream_scale;
             }
 
             // Start evdi-helper if not running
@@ -715,8 +765,8 @@ impl CaptureManager {
             // Skipped with no tablet attached: the output is disabled then, so
             // no mode is ever reported and the wait would just add three
             // seconds and a warning to every daemon start.
-            if *tablet_rx.borrow() && self.mode_rx.borrow().is_none() {
-                let mut wait_rx = self.mode_rx.clone();
+            if *tablet_rx.borrow() && self.stream_rx.borrow().is_none() {
+                let mut wait_rx = self.stream_rx.clone();
                 if tokio::time::timeout(
                     std::time::Duration::from_secs(3),
                     wait_rx.changed(),
@@ -731,6 +781,7 @@ impl CaptureManager {
                 }
             }
             mode_rx.borrow_and_update();
+            stream_rx.borrow_and_update();
 
             // Start encoder if not running
             if self.encoder_child.is_none() {
@@ -776,6 +827,15 @@ impl CaptureManager {
                 _ = settings_rx.changed() => {
                     info!("Settings changed — restarting encoder");
                     settings_changed = true;
+                }
+                _ = stream_rx.changed() => {
+                    let now = self.active_mode();
+                    if Some(now) == encoder_mode {
+                        resume_same_encoder = true;
+                    } else {
+                        info!("Stream size is now {}x{} — restarting encoder", now.0, now.1);
+                        mode_changed = true;
+                    }
                 }
                 _ = mode_rx.changed() => {
                     let now = self.active_mode();

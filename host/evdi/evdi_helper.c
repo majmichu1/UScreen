@@ -66,7 +66,18 @@ static unsigned char *g_dirty_latest = NULL;
 static unsigned char *g_dirty_write = NULL;
 static int g_dirty_bytes = 0;      /* size of one mask */
 static int g_chroma_rows = 0;      /* mode height / 2 */
-static int g_packed_size = 0;          /* NV12 frame: w*h*3/2 */
+static int g_packed_size = 0;          /* NV12 frame: out_w*out_h*3/2 */
+
+/* Integer downscale applied on the way to the encoder. The desktop keeps its
+   native mode — window layout and scaling are unaffected — while the stream
+   carries fewer pixels. That cuts both the bytes crossing into the encoder and
+   the tablet's decode time, which measurements put at roughly 7-8ms fixed plus
+   1.2ms per megapixel. An integer divisor means the tablet upscales by a whole
+   number, avoiding resampling artefacts on top of the softness.
+   1 = native, and keeps the original tight conversion loop. */
+static int g_scale = 1;
+static int g_out_w = 0;
+static int g_out_h = 0;
 static volatile int g_buffers_ready = 0;
 
 /* How long an unchanged screen may go without a frame being re-sent.
@@ -149,13 +160,60 @@ typedef struct {
     const unsigned char *src;   /* BGRA, stride-padded */
     unsigned char *ydst;        /* Y plane, w bytes/row */
     unsigned char *uvdst;       /* interleaved CbCr, w bytes per chroma row */
-    int w, h, stride;
+    int w, h, stride;           /* source dimensions */
+    int ow, oh;                 /* destination dimensions (w/scale, h/scale) */
+    int scale;                  /* 1 = no downscale */
     int cy0, cy1;               /* chroma-row range [cy0, cy1) this job owns */
     const unsigned char *dirty; /* NULL = convert everything */
 } conv_job_t;
 
 static inline int row_is_dirty(const unsigned char *mask, int cy) {
     return mask == NULL || (mask[cy >> 3] & (1u << (cy & 7)));
+}
+
+/* Downscaling variant: every output pixel is the mean of a scale x scale
+   source block, and each chroma sample the mean of the 2*scale square it
+   covers. Box averaging rather than point sampling — dropping pixels would
+   alias hard on desktop content, where single-pixel lines are everywhere. */
+static inline void convert_strip_scaled(const conv_job_t *j) {
+    const int n = j->scale, stride = j->stride, ow = j->ow;
+    const int inv = n * n;
+    for (int cy = j->cy0; cy < j->cy1; cy++) {
+        if (!row_is_dirty(j->dirty, cy))
+            continue;
+        unsigned char *yo0 = j->ydst + (size_t)(cy * 2) * ow;
+        unsigned char *yo1 = yo0 + ow;
+        unsigned char *uv  = j->uvdst + (size_t)cy * ow;
+        for (int ox = 0; ox < ow; ox += 2) {
+            int csb = 0, csg = 0, csr = 0;      /* chroma: whole 2n x 2n block */
+            for (int q = 0; q < 4; q++) {       /* four output luma pixels */
+                int oxx = ox + (q & 1);
+                int oyy = cy * 2 + (q >> 1);
+                int sb = 0, sg = 0, sr = 0;
+                for (int dy = 0; dy < n; dy++) {
+                    const unsigned char *row =
+                        j->src + (size_t)(oyy * n + dy) * stride + (size_t)(oxx * n) * 4;
+                    for (int dx = 0; dx < n; dx++) {
+                        sb += row[dx * 4];
+                        sg += row[dx * 4 + 1];
+                        sr += row[dx * 4 + 2];
+                    }
+                }
+                int b = sb / inv, g = sg / inv, r = sr / inv;
+                unsigned char yv =
+                    (unsigned char)(((47 * r + 157 * g + 16 * b + 128) >> 8) + 16);
+                if (q < 2) yo0[oxx] = yv; else yo1[oxx] = yv;
+                csb += b; csg += g; csr += r;
+            }
+            int ab = csb >> 2, ag = csg >> 2, ar = csr >> 2;
+            int cb = (((-26 * ar - 87 * ag + 112 * ab + 128) >> 8) + 128);
+            int cr = (((112 * ar - 102 * ag - 10 * ab + 128) >> 8) + 128);
+            if (cb < 0) cb = 0; else if (cb > 255) cb = 255;
+            if (cr < 0) cr = 0; else if (cr > 255) cr = 255;
+            uv[ox]     = (unsigned char)cb;
+            uv[ox + 1] = (unsigned char)cr;
+        }
+    }
 }
 
 static inline void convert_strip(const conv_job_t *j) {
@@ -217,7 +275,8 @@ static void *conv_worker(void *arg) {
         last_gen = g_pool_gen;
         pthread_mutex_unlock(&g_pool_mtx);
 
-        convert_strip(&g_jobs[id]);
+        if (g_jobs[id].scale > 1) convert_strip_scaled(&g_jobs[id]);
+        else convert_strip(&g_jobs[id]);
 
         pthread_mutex_lock(&g_pool_mtx);
         if (--g_pool_active == 0)
@@ -240,11 +299,12 @@ static void conv_pool_init(void) {
 
 static void bgra_to_nv12(const unsigned char *src, unsigned char *dst,
                          const unsigned char *dirty) {
-    int ch = g_mode_h / 2;
+    int ch = g_out_h / 2;
     unsigned char *ydst = dst;
-    unsigned char *uvdst = dst + (size_t)g_mode_w * g_mode_h;
+    unsigned char *uvdst = dst + (size_t)g_out_w * g_out_h;
     for (int i = 0; i < g_nthreads; i++) {
         g_jobs[i] = (conv_job_t){ src, ydst, uvdst, g_mode_w, g_mode_h, g_mode_stride,
+                                  g_out_w, g_out_h, g_scale,
                                   ch * i / g_nthreads, ch * (i + 1) / g_nthreads,
                                   dirty };
     }
@@ -255,7 +315,8 @@ static void bgra_to_nv12(const unsigned char *src, unsigned char *dst,
         pthread_cond_broadcast(&g_pool_go);
         pthread_mutex_unlock(&g_pool_mtx);
     }
-    convert_strip(&g_jobs[0]);              /* caller does its own strip */
+    if (g_jobs[0].scale > 1) convert_strip_scaled(&g_jobs[0]);
+    else convert_strip(&g_jobs[0]);   /* caller does its own strip */
     if (g_nthreads > 1) {
         pthread_mutex_lock(&g_pool_mtx);
         while (g_pool_active > 0)
@@ -278,7 +339,10 @@ static void mark_damage(const struct evdi_rect *rects, int n) {
     for (int i = 0; i < n; i++) {
         int y0 = rects[i].y1, y1 = rects[i].y2;
         if (y1 < y0) { int t = y0; y0 = y1; y1 = t; }
-        int c0 = y0 / 2, c1 = (y1 + 1) / 2;
+        /* Source rows map onto output chroma rows through the scale: one
+           chroma row covers 2*scale source rows. */
+        int div = 2 * g_scale;
+        int c0 = y0 / div, c1 = (y1 + div - 1) / div;
         if (c0 < 0) c0 = 0;
         if (c1 > g_chroma_rows) c1 = g_chroma_rows;
         for (int cy = c0; cy < c1; cy++) {
@@ -378,14 +442,21 @@ static void on_mode_changed(struct evdi_mode mode, void *user_data) {
     free(g_framebuffer);
     g_framebuffer = malloc(g_fb_size);
 
+    /* Stream dimensions: source divided by the scale, forced even because
+       NV12 chroma covers 2x2 luma samples. */
+    g_out_w = (g_mode_w / g_scale) & ~1;
+    g_out_h = (g_mode_h / g_scale) & ~1;
+    if (g_out_w < 2) g_out_w = 2;
+    if (g_out_h < 2) g_out_h = 2;
+
     /* Packed buffers hold NV12 (Y plane + half-size interleaved CbCr). */
-    g_packed_size = g_mode_w * g_mode_h * 3 / 2;
+    g_packed_size = g_out_w * g_out_h * 3 / 2;
     free(g_fill);   g_fill = malloc(g_packed_size);
     free(g_latest); g_latest = malloc(g_packed_size);
     free(g_write);  g_write = malloc(g_packed_size);
 
     /* Fresh buffers hold nothing, so every row is stale in all of them. */
-    g_chroma_rows = g_mode_h / 2;
+    g_chroma_rows = g_out_h / 2;
     g_dirty_bytes = (g_chroma_rows + 7) / 8;
     free(g_dirty_fill);   g_dirty_fill   = malloc((size_t)g_dirty_bytes);
     free(g_dirty_latest); g_dirty_latest = malloc((size_t)g_dirty_bytes);
@@ -803,6 +874,10 @@ int main(int argc, char *argv[]) {
             edid_path = argv[++i];
         } else if (strcmp(argv[i], "--capture-fifo") == 0 && i + 1 < argc) {
             fifo_path = argv[++i];
+        } else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc) {
+            g_scale = atoi(argv[++i]);
+            if (g_scale < 1) g_scale = 1;
+            if (g_scale > 4) g_scale = 4;
         } else if (strcmp(argv[i], "--fps") == 0 && i + 1 < argc) {
             g_fps = atoi(argv[++i]);
             if (g_fps < 1 || g_fps > 240) g_fps = 60;
@@ -810,7 +885,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (!edid_path) {
-        fprintf(stderr, "Usage: %s --edid <edid.bin> [--capture-fifo <path>] [--fps <n>]\n", argv[0]);
+        fprintf(stderr, "Usage: %s --edid <edid.bin> [--capture-fifo <path>] [--fps <n>] [--scale <1-4>]\n", argv[0]);
         return 1;
     }
 
