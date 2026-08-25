@@ -262,19 +262,32 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         }
     });
 
+    // Fields the user overrode on the command line for this run only. They
+    // must not be written back: a flag is not a settings change, and
+    // persisting one silently rewrites the user's configuration behind them.
+    let cli_overrides = (
+        cli.encoder.is_some(),
+        cli.fps.is_some(),
+        cli.bitrate.is_some(),
+        cli.width.is_some(),
+        cli.height.is_some(),
+        cli.quality.is_some(),
+        cli.stream_scale.is_some(),
+    );
+
     // Persist settings changes pushed at runtime back to the config file
     let mut settings_rx_save = settings_rx.clone();
     let save_handle = tokio::spawn(async move {
         while settings_rx_save.changed().await.is_ok() {
             let s = settings_rx_save.borrow().clone();
             let mut cfg = config::FileConfig::load();
-            cfg.encoder = s.encoder;
-            cfg.fps = s.fps;
-            cfg.bitrate = s.bitrate;
-            cfg.width = s.width;
-            cfg.height = s.height;
-            cfg.quality = s.quality;
-            cfg.stream_scale = s.stream_scale;
+            if !cli_overrides.0 { cfg.encoder = s.encoder; }
+            if !cli_overrides.1 { cfg.fps = s.fps; }
+            if !cli_overrides.2 { cfg.bitrate = s.bitrate; }
+            if !cli_overrides.3 { cfg.width = s.width; }
+            if !cli_overrides.4 { cfg.height = s.height; }
+            if !cli_overrides.5 { cfg.quality = s.quality; }
+            if !cli_overrides.6 { cfg.stream_scale = s.stream_scale; }
             if let Err(e) = cfg.save() {
                 warn!("Failed to persist settings: {}", e);
             } else {
