@@ -145,6 +145,11 @@ pub enum InputEvent {
         fps: Option<u32>,
         encoder: Option<String>,
     },
+    /// The tablet asking to switch between being a second screen and being a
+    /// graphics tablet. Applied live: the host remaps the input devices onto
+    /// the other output and brings the virtual display up or down to match.
+    #[serde(rename = "mode")]
+    Mode { pen_only: bool },
     /// The tablet has this frame on screen. Closes the latency measurement
     /// loop — the host timed the frame out, so the round trip needs no clock
     /// agreement between the two devices.
@@ -172,8 +177,6 @@ pub struct InputResponse {
 #[derive(Clone)]
 pub struct InputConfig {
     pub port: u16,
-    /// Map the devices onto the laptop's screen rather than the virtual one.
-    pub pen_only: bool,
     pub virtual_width: u32,
     pub virtual_height: u32,
 }
@@ -182,7 +185,6 @@ impl Default for InputConfig {
     fn default() -> Self {
         Self {
             port: 8891,
-            pen_only: false,
             virtual_width: 2960,
             virtual_height: 1848,
         }
@@ -759,6 +761,10 @@ pub struct InputServer {
     config: InputConfig,
     running: Arc<AtomicBool>,
     settings_tx: Option<watch::Sender<EncoderSettings>>,
+    /// Which mode the daemon is in, and how the tablet changes it. Owned as a
+    /// channel rather than a field because the mode is switchable at runtime
+    /// and several parts of the daemon have to follow it.
+    mode_tx: watch::Sender<bool>,
     latency: crate::latency::LatencyTracker,
 }
 
@@ -766,12 +772,14 @@ impl InputServer {
     pub fn new(
         config: InputConfig,
         settings_tx: Option<watch::Sender<EncoderSettings>>,
+        mode_tx: watch::Sender<bool>,
         latency: crate::latency::LatencyTracker,
     ) -> Self {
         Self {
             config,
             running: Arc::new(AtomicBool::new(false)),
             settings_tx,
+            mode_tx,
             latency,
         }
     }
@@ -840,7 +848,34 @@ impl InputServer {
         });
         let uinput = Arc::new(std::sync::Mutex::new(devices));
 
-        map_devices_to_output(self.config.pen_only).await;
+        // Follow the mode for as long as the daemon runs. A switch has to move
+        // the pen and touch devices onto the other output, and drop anything
+        // held at the moment of the switch — a finger or pen tip that was down
+        // would otherwise stay down on a screen that is no longer listening.
+        {
+            let mut mode_rx = self.mode_tx.subscribe();
+            let devices = uinput.clone();
+            let initial = *mode_rx.borrow_and_update();
+            map_devices_to_output(initial).await;
+            tokio::spawn(async move {
+                while mode_rx.changed().await.is_ok() {
+                    let pen_only = *mode_rx.borrow();
+                    if let Ok(mut guard) = devices.lock() {
+                        guard.release_all();
+                    }
+                    // Leaving display mode tears the virtual output down and
+                    // entering it brings the output back; either way KWin is
+                    // mid-reconfiguration right now, and mapping onto an
+                    // output it is still moving would not stick.
+                    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                    info!(
+                        "Mode is now {} — remapping input devices",
+                        if pen_only { "pen-only" } else { "second screen" }
+                    );
+                    map_devices_to_output(pen_only).await;
+                }
+            });
+        }
 
         let config = self.config.clone();
         let running = self.running.clone();
@@ -866,10 +901,13 @@ impl InputServer {
             info!("Input client: {}", peer);
             let cfg = config.clone();
             let settings = self.settings_tx.clone();
+            let mode_tx = self.mode_tx.clone();
             let latency = self.latency.clone();
             let devices = uinput.clone();
             tokio::spawn(async move {
-                if let Err(e) = handle_connection(socket, cfg, settings, latency, devices).await {
+                if let Err(e) =
+                    handle_connection(socket, cfg, settings, mode_tx, latency, devices).await
+                {
                     warn!("Input handler {}: {}", peer, e);
                 }
             });
@@ -890,6 +928,7 @@ async fn handle_connection(
     raw_stream: tokio::net::TcpStream,
     config: InputConfig,
     settings_tx: Option<watch::Sender<EncoderSettings>>,
+    mode_tx: watch::Sender<bool>,
     latency: crate::latency::LatencyTracker,
     uinput: Arc<std::sync::Mutex<InjectDevices>>,
 ) -> Result<()> {
@@ -898,23 +937,54 @@ async fn handle_connection(
         .context("WebSocket handshake failed")?;
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+    let mut mode_rx = mode_tx.subscribe();
 
     let resp = InputResponse {
         status: "connected".to_string(),
         width: config.virtual_width,
         height: config.virtual_height,
-        pen_only: config.pen_only,
+        pen_only: *mode_rx.borrow_and_update(),
     };
 
     ws_sender
         .send(Message::Text(serde_json::to_string(&resp)?))
         .await?;
 
-    while let Some(msg) = ws_receiver.next().await {
+    loop {
+        let msg = tokio::select! {
+            incoming = ws_receiver.next() => match incoming {
+                Some(m) => m,
+                None => break,
+            },
+            // The mode changed — here, from the GUI, or from the command line.
+            // Whoever changed it, the tablet has to hear about it: it decides
+            // from this whether to expect a video stream at all.
+            changed = mode_rx.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                let pen_only = *mode_rx.borrow();
+                let resp = InputResponse {
+                    status: "mode".to_string(),
+                    width: config.virtual_width,
+                    height: config.virtual_height,
+                    pen_only,
+                };
+                if ws_sender
+                    .send(Message::Text(serde_json::to_string(&resp)?))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+                continue;
+            }
+        };
+
         match msg {
             Ok(Message::Text(text)) => match serde_json::from_str::<InputEvent>(&text) {
                 Ok(event) => {
-                    handle_event(event, &uinput, &settings_tx, &latency);
+                    handle_event(event, &uinput, &settings_tx, &mode_tx, &latency);
                 }
                 Err(e) => {
                     warn!("Invalid input: {} - {}", e, text);
@@ -970,6 +1040,7 @@ fn handle_event(
     event: InputEvent,
     uinput: &Arc<std::sync::Mutex<InjectDevices>>,
     settings_tx: &Option<watch::Sender<EncoderSettings>>,
+    mode_tx: &watch::Sender<bool>,
     latency: &crate::latency::LatencyTracker,
 ) {
     match event {
@@ -1149,6 +1220,20 @@ fn handle_event(
                 );
                 let _ = tx.send(new);
             }
+        }
+
+        InputEvent::Mode { pen_only } => {
+            // Only publish a real change. A watch send always wakes every
+            // follower, so re-sending the current mode would tear the virtual
+            // display down and back up for nothing.
+            if *mode_tx.borrow() == pen_only {
+                return;
+            }
+            info!(
+                "Tablet switched to {}",
+                if pen_only { "pen-only mode" } else { "second-screen mode" }
+            );
+            let _ = mode_tx.send(pen_only);
         }
     }
 }

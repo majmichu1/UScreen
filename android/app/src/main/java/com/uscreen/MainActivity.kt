@@ -185,6 +185,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Stylus hover, caught at the activity rather than on the SurfaceView.
+     *
+     * A hover listener on the SurfaceView does not reliably receive stylus
+     * hover once Compose is in the picture — anything drawn over the surface
+     * sits between the pointer and that listener. Hover is what moves the
+     * cursor on the host, so without it there is no way to see where the pen
+     * is pointing before it touches down, which matters most in graphics
+     * tablet mode where the host's screen is all you are looking at.
+     *
+     * Safe to take at this level precisely because hover is not a click: it
+     * cannot steal taps from the settings button the way intercepting touch
+     * would.
+     */
+    override fun onGenericMotionEvent(event: android.view.MotionEvent): Boolean {
+        val w = window.decorView.width
+        val h = window.decorView.height
+        if (w > 0 && h > 0 && touchCapture?.handleHoverEvent(event, w, h) == true) {
+            return true
+        }
+        return super.onGenericMotionEvent(event)
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
@@ -376,6 +399,15 @@ fun UScreenMain(
         if (showSettings) {
             SettingsSheet(
                 prefs = prefs,
+                penOnly = penOnly,
+                onPenOnlyChange = { wantPenOnly ->
+                    // Fire and forget: the host answers with the mode it
+                    // actually switched to, and that answer is what moves the
+                    // UI. Flipping it here as well would show the new mode
+                    // even when the host never got the message.
+                    touchCapture?.sendMode(wantPenOnly)
+                    showSettings = false
+                },
                 showStats = showStats,
                 onShowStatsChange = {
                     showStats = it
@@ -490,6 +522,8 @@ private fun ConnectionScreen() {
 @Composable
 private fun SettingsSheet(
     prefs: Prefs?,
+    penOnly: Boolean,
+    onPenOnlyChange: (Boolean) -> Unit,
     showStats: Boolean,
     onShowStatsChange: (Boolean) -> Unit,
     onApply: (bitrateKbps: Int, fps: Int) -> Unit,
@@ -506,13 +540,39 @@ private fun SettingsSheet(
     ) {
         Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
             Text(
-                "Stream settings",
+                "Settings",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
             Spacer(Modifier.height(20.dp))
 
+            // What the tablet is for, right now. Everything below only applies
+            // when it is a screen, so the stream controls fold away when it
+            // isn't.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Graphics tablet", fontSize = 14.sp, color = Color(0xFFB0B0C0))
+                    Text(
+                        "Draw on the computer's own screen with the pen, " +
+                            "instead of showing a second screen here",
+                        fontSize = 11.sp,
+                        color = Color(0xFF6A6A7E)
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = penOnly,
+                    onCheckedChange = onPenOnlyChange,
+                    colors = SwitchDefaults.colors(checkedTrackColor = Accent)
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+
+            if (!penOnly) {
             Text(
                 "Bitrate: ${bitrateMbps.roundToInt()} Mbps",
                 fontSize = 14.sp,
@@ -552,6 +612,7 @@ private fun SettingsSheet(
                 }
             }
             Spacer(Modifier.height(20.dp))
+            }
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -573,24 +634,26 @@ private fun SettingsSheet(
             }
             Spacer(Modifier.height(24.dp))
 
-            Button(
-                onClick = {
-                    onApply((bitrateMbps * 1000).roundToInt(), fpsChoice)
-                    onDismiss()
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Accent)
-            ) {
-                Text("Apply", fontSize = 16.sp, modifier = Modifier.padding(vertical = 4.dp))
+            if (!penOnly) {
+                Button(
+                    onClick = {
+                        onApply((bitrateMbps * 1000).roundToInt(), fpsChoice)
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                ) {
+                    Text("Apply", fontSize = 16.sp, modifier = Modifier.padding(vertical = 4.dp))
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Applying restarts the stream for a moment.",
+                    fontSize = 11.sp,
+                    color = Color(0xFF6A6A7E),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Applying restarts the stream for a moment.",
-                fontSize = 11.sp,
-                color = Color(0xFF6A6A7E),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
             Spacer(Modifier.height(24.dp))
         }
     }

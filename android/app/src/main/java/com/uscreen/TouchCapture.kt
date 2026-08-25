@@ -31,6 +31,7 @@ class TouchCapture {
 
     /** Settings to (re)send to the host whenever the control channel connects */
     @Volatile private var pendingConfig: JSONObject? = null
+    @Volatile private var pendingMode: JSONObject? = null
 
     /** Tablet's native landscape resolution, reported to the host on connect
      *  so the virtual display can match it automatically. */
@@ -75,6 +76,10 @@ class TouchCapture {
                         "(${nativeWidthMm}x${nativeHeightMm} mm)")
             }
             pendingConfig?.let { webSocket.send(it.toString()) }
+            pendingMode?.let {
+                webSocket.send(it.toString())
+                pendingMode = null
+            }
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -155,6 +160,31 @@ class TouchCapture {
             if (!isConnected) {
                 connectWebSocket()
             }
+        }
+    }
+
+    /**
+     * Forward stylus hover so the host's cursor follows the pen before it
+     * touches down. Returns true only for pen hover, so nothing else the
+     * activity might want to do with generic motion events is disturbed.
+     */
+    fun handleHoverEvent(event: MotionEvent, width: Int, height: Int): Boolean {
+        if (!isConnected) return false
+        val vw = width.coerceAtLeast(1).toFloat()
+        val vh = height.coerceAtLeast(1).toFloat()
+        return when (event.actionMasked) {
+            MotionEvent.ACTION_HOVER_ENTER,
+            MotionEvent.ACTION_HOVER_MOVE -> {
+                if (!isPenLike(event, 0)) return false
+                sendPenEvent(event, 0, 3, vw, vh)
+                true
+            }
+            MotionEvent.ACTION_HOVER_EXIT -> {
+                if (!isPenLike(event, 0)) return false
+                sendPenProximityExit()
+                true
+            }
+            else -> false
         }
     }
 
@@ -432,6 +462,27 @@ class TouchCapture {
             if (decodeUs >= 0) put("decode_us", decodeUs)
         }
         webSocket?.send(msg.toString())
+    }
+
+    /**
+     * Ask the host to switch between being a second screen and being a
+     * graphics tablet. The host applies it and answers with its new mode, so
+     * the UI follows [onModeKnown] rather than assuming this succeeded.
+     */
+    fun sendMode(penOnly: Boolean) {
+        val msg = JSONObject().apply {
+            put("type", "mode")
+            put("pen_only", penOnly)
+        }
+        if (isConnected) {
+            webSocket?.send(msg.toString())
+            Log.i(TAG, "Requested mode: ${if (penOnly) "pen-only" else "display"}")
+        } else {
+            // Held rather than replayed forever: the host is the source of
+            // truth for the mode, and re-asserting a stale choice on every
+            // reconnect would fight whatever it was set to in the meantime.
+            pendingMode = msg
+        }
     }
 
     fun isControlConnected(): Boolean = isConnected

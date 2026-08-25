@@ -197,10 +197,14 @@ async fn run_daemon(cli: Cli) -> Result<()> {
 
     let input_config = input::InputConfig {
         port: input_port,
-        pen_only,
         virtual_width: width,
         virtual_height: height,
     };
+
+    // Which of the two jobs the tablet is doing. Switchable at runtime from
+    // the tablet's own settings, so it lives in a channel the input server,
+    // the capture manager and the config writer all follow.
+    let (mode_tx, _) = watch::channel(pen_only);
 
     // Live-tunable settings (from the tablet app or by editing the config
     // file). A change restarts the encoder on the fly.
@@ -221,7 +225,12 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     let latency = capture_mgr.latency_tracker();
     let stream_srv =
         stream::StreamServer::new(stream_config, codec_config, capture_mgr.idr_request_flag());
-    let input_srv = input::InputServer::new(input_config, Some(settings_tx.clone()), latency);
+    let input_srv = input::InputServer::new(
+        input_config,
+        Some(settings_tx.clone()),
+        mode_tx.clone(),
+        latency,
+    );
 
     // Deliberately shallow. This ring is pure latency when it fills: 256 frames
     // is four seconds of backlog at 60 fps, and a client that fell behind would
@@ -241,9 +250,31 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     info!("  Stream port: {}", video_port);
     info!("  Input port: {}", input_port);
 
-    // Tablet presence, published by the ADB monitor. The capture manager
-    // follows it so the virtual display exists exactly while the tablet does.
-    let (tablet_tx, tablet_rx) = watch::channel(false);
+    // Tablet presence, published by the ADB monitor.
+    let (tablet_tx, mut tablet_rx) = watch::channel(false);
+
+    // What the capture manager actually follows: the virtual display should
+    // exist exactly while a tablet is attached *and* being used as a screen.
+    // Folding the mode in here is what makes switching live — the capture
+    // manager already knows how to raise and tear down the display on this
+    // signal, and cannot tell the difference between an unplugged tablet and
+    // one that is currently a drawing surface.
+    let (gate_tx, gate_rx) = watch::channel(false);
+    let mut mode_rx_gate = mode_tx.subscribe();
+    tokio::spawn(async move {
+        let mut last = false;
+        loop {
+            let active = *tablet_rx.borrow() && !*mode_rx_gate.borrow();
+            if active != last {
+                last = active;
+                let _ = gate_tx.send(active);
+            }
+            tokio::select! {
+                r = tablet_rx.changed() => if r.is_err() { break },
+                r = mode_rx_gate.changed() => if r.is_err() { break },
+            }
+        }
+    });
 
     // Cooperative shutdown: the capture task must get a chance to kill and reap
     // ffmpeg/evdi_helper before the process exits, or they linger holding the
@@ -251,22 +282,19 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     if pen_only {
-        info!("Pen-only mode: no virtual display, no capture, no encoding.");
-        info!("  The tablet drives this machine's own screen with the pen.");
+        info!("Starting in pen-only mode: the tablet drives this machine's own");
+        info!("  screen with the pen. No virtual display, no encoding.");
     }
 
     let video_tx_cap = video_tx.clone();
     let settings_rx_cap = settings_rx.clone();
     let cap_handle = tokio::spawn(async move {
-        let mut shutdown_rx = shutdown_rx;
-        if pen_only {
-            // Nothing to capture: park until shutdown rather than building a
-            // display nobody looks at.
-            let _ = shutdown_rx.changed().await;
-            return;
-        }
+        // Started in both modes. In pen-only the gate below holds the virtual
+        // output disabled and nothing is encoded, but the helper is up and
+        // ready — which is what lets a switch back to second-screen mode show
+        // a picture immediately instead of rebuilding the pipeline first.
         if let Err(e) = capture_mgr
-            .stream_frames(video_tx_cap, settings_rx_cap, tablet_rx, shutdown_rx)
+            .stream_frames(video_tx_cap, settings_rx_cap, gate_rx, shutdown_rx)
             .await
         {
             error!("Capture manager failed: {}", e);
@@ -320,6 +348,21 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         }
     });
 
+    // Remember which mode the tablet was left in. Unlike the --pen-only flag,
+    // which is a one-off for this run and never written back, a switch made
+    // from the tablet is a deliberate choice and should survive a restart.
+    let mut mode_rx_save = mode_tx.subscribe();
+    let mode_save_handle = tokio::spawn(async move {
+        while mode_rx_save.changed().await.is_ok() {
+            let pen_only = *mode_rx_save.borrow();
+            let mut cfg = config::FileConfig::load();
+            cfg.pen_only = pen_only;
+            if let Err(e) = cfg.save() {
+                warn!("Failed to persist mode: {}", e);
+            }
+        }
+    });
+
     // Plug-and-play: watch for the tablet over ADB, set up port forwarding
     // and launch the app whenever it's (re)connected.
     let auto_launch = file_cfg.auto_launch_app;
@@ -367,6 +410,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     input_handle.abort();
     adb_handle.abort();
     save_handle.abort();
+    mode_save_handle.abort();
 
     // Clean up PID file
     let _ = std::fs::remove_file(&pid_path);

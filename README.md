@@ -135,15 +135,25 @@ on `org.kde.kwin.VirtualKeyboard` over D-Bus is what takes effect.
 
 ### Graphics tablet mode
 
-With `pen_only` (a checkbox in `uscreen-gui`, or `--pen-only`) the tablet stops
-being a second screen and becomes a drawing surface for the screen you are
-already looking at, like a Wacom Intuos. Nothing is captured, encoded or
-streamed, and the pen is mapped onto your own display instead of the virtual
-one.
+The tablet stops being a second screen and becomes a drawing surface for the
+screen you are already looking at, like a Wacom Intuos. Nothing is captured,
+encoded or streamed, and the pen is mapped onto your own display instead of the
+virtual one.
 
 For drawing this removes display latency from the loop entirely — you watch the
-host's screen, which has none — and it costs no CPU at all. Pressure, tilt, the
-eraser and the stylus button all work exactly as they do in display mode.
+host's screen, which has none — and with nothing being captured or encoded the
+pipeline costs next to nothing. Pressure, tilt, the eraser and the stylus
+button all work exactly as they do in display mode.
+
+**Switch it from the tablet.** Tap the ⚙ in the corner and flip *Graphics
+tablet*; the change takes effect immediately, with no restart and no trip to
+the computer. The host tears the virtual display down, moves the pen onto your
+own screen and stops encoding — and puts it all back when you switch off. The
+mode is remembered, so the tablet comes back the way you left it.
+
+It is also settable from the host, as a checkbox in `uscreen-gui` or with
+`--pen-only`. The flag applies to that run only; a switch made from the tablet
+is a deliberate choice and is written to the config file.
 
 ### Stream detail vs latency
 

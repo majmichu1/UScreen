@@ -544,7 +544,11 @@ class VideoReceiver {
 
         releaseCodec()
 
-        surfaceReady.set(false)
-        pendingSurface.set(null)
+        // The surface is deliberately left alone. It belongs to the
+        // SurfaceView, which outlives any single streaming session — it stays
+        // in the view tree while the tablet is a graphics tablet, so no
+        // surfaceCreated callback ever comes to hand it back. Clearing it here
+        // left the next start() waiting on a surface that would never arrive,
+        // showing the last decoded frame frozen on screen.
     }
 }

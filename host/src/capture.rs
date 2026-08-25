@@ -714,7 +714,7 @@ impl CaptureManager {
         &mut self,
         tx: broadcast::Sender<VideoPacket>,
         mut settings_rx: watch::Receiver<EncoderSettings>,
-        mut tablet_rx: watch::Receiver<bool>,
+        mut display_rx: watch::Receiver<bool>,
         mut shutdown_rx: watch::Receiver<bool>,
     ) -> Result<()> {
         // Exponential backoff: a crash-looping helper floods KWin with
@@ -779,11 +779,11 @@ impl CaptureManager {
             // Enable the display via kscreen-doctor so KWin actively renders
             // to it (which is what makes evdi_grab_pixels produce anything).
             //
-            // Only while a tablet is actually attached: enabling it
-            // unconditionally puts a monitor on the desktop that nobody can
-            // see, and KDE happily moves windows onto it. The tablet_rx branch
-            // below enables it the moment one is plugged in.
-            if *tablet_rx.borrow() {
+            // Only while a tablet is attached and being used as a screen:
+            // enabling it unconditionally puts a monitor on the desktop that
+            // nobody can see, and KDE happily moves windows onto it. The
+            // display_rx branch below enables it the moment that changes.
+            if *display_rx.borrow() {
                 Self::enable_evdi_display(self.helper_card).await;
             }
 
@@ -792,10 +792,10 @@ impl CaptureManager {
             // and getting it wrong yields a skewed picture for the whole
             // session, so a short wait is cheap insurance.
             //
-            // Skipped with no tablet attached: the output is disabled then, so
-            // no mode is ever reported and the wait would just add three
-            // seconds and a warning to every daemon start.
-            if *tablet_rx.borrow() && self.stream_rx.borrow().is_none() {
+            // Skipped when nothing is using the virtual output: it is
+            // disabled then, so no mode is ever reported and the wait would
+            // just add three seconds and a warning to every daemon start.
+            if *display_rx.borrow() && self.stream_rx.borrow().is_none() {
                 let mut wait_rx = self.stream_rx.clone();
                 if tokio::time::timeout(
                     std::time::Duration::from_secs(3),
@@ -922,16 +922,17 @@ impl CaptureManager {
                         mode_changed = true;
                     }
                 }
-                _ = tablet_rx.changed() => {
-                    // Follow the tablet: an unplugged tablet must not leave a
-                    // monitor behind that nobody can see, with windows stranded
-                    // on it. The encoder itself is unaffected either way.
-                    let present = *tablet_rx.borrow();
-                    if present {
-                        info!("Tablet present — enabling the virtual display");
+                _ = display_rx.changed() => {
+                    // The tablet stopped being a screen — either unplugged, or
+                    // switched to pen-only. Neither must leave a monitor behind
+                    // that nobody can see, with windows stranded on it. The
+                    // encoder itself is unaffected either way.
+                    let wanted = *display_rx.borrow();
+                    if wanted {
+                        info!("Tablet is a screen — enabling the virtual display");
                         Self::enable_evdi_display(card).await;
                     } else {
-                        info!("Tablet gone — disabling the virtual display");
+                        info!("Tablet is not a screen — disabling the virtual display");
                         Self::disable_evdi_display(card).await;
                     }
                     resume_same_encoder = true;
