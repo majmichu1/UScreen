@@ -34,14 +34,23 @@ pub struct StreamServer {
     config: StreamConfig,
     running: Arc<AtomicBool>,
     codec_config: Arc<Mutex<Option<Bytes>>>,
+    /// Raised when a client attaches so the encoder makes the next frame a
+    /// keyframe. Without it a client joining an idle screen waits for the
+    /// scheduled one, which on a mostly-static desktop can be seconds of black.
+    idr_wanted: Arc<AtomicBool>,
 }
 
 impl StreamServer {
-    pub fn new(config: StreamConfig, codec_config: Arc<Mutex<Option<Bytes>>>) -> Self {
+    pub fn new(
+        config: StreamConfig,
+        codec_config: Arc<Mutex<Option<Bytes>>>,
+        idr_wanted: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             config,
             running: Arc::new(AtomicBool::new(false)),
             codec_config,
+            idr_wanted,
         }
     }
 
@@ -78,6 +87,9 @@ impl StreamServer {
             };
 
             info!("Client connected: {}", peer);
+            // Ask for a keyframe now rather than letting this client stare at
+            // nothing until the next scheduled one.
+            self.idr_wanted.store(true, Ordering::SeqCst);
             let rx = video_rx.resubscribe();
             let cc = self.codec_config.clone();
             tokio::spawn(async move {

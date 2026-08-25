@@ -167,3 +167,143 @@ fn copy_plane(dst: &mut [u8], stride: usize, src: &[u8], row_bytes: usize, rows:
         }
     }
 }
+
+/// Read whole NV12 frames from the helper's FIFO, encode them, and publish the
+/// access units. Replaces spawning ffmpeg and parsing Annex B out of its stdout.
+///
+/// Reads a frame at a time rather than in the ~32KB chunks ffmpeg's I/O layer
+/// uses, which is most of the point: at 8.2MB a frame that is the difference
+/// between four syscalls and two hundred and fifty.
+pub fn run(
+    fifo_path: &str,
+    encoder_name: &str,
+    width: u32,
+    height: u32,
+    fps: u32,
+    bitrate_kbps: u32,
+    quality: u32,
+    tx: tokio::sync::broadcast::Sender<crate::capture::VideoPacket>,
+    codec_config: std::sync::Arc<std::sync::Mutex<Option<Bytes>>>,
+    idr_wanted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    latency: crate::latency::LatencyTracker,
+) -> Result<()> {
+    use std::sync::atomic::Ordering;
+
+    let mut enc = Encoder::new(encoder_name, width, height, fps, bitrate_kbps, quality)?;
+    let frame_size = (width as usize) * (height as usize) * 3 / 2;
+
+    // Opened non-blocking on purpose. A plain open() on a FIFO blocks until a
+    // writer appears, and with no tablet attached the display stays off and the
+    // helper never writes — the task would sit in that open() ignoring the stop
+    // flag until the process exited. O_NONBLOCK returns immediately for a
+    // reader, and reads below poll for data while staying responsive to stop.
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut fifo = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(fifo_path)
+        .with_context(|| format!("open {} for reading", fifo_path))?;
+    tracing::info!(
+        "In-process encoder running: {} at {}x{}",
+        encoder_name,
+        width,
+        height
+    );
+
+    let mut buf = vec![0u8; frame_size];
+    let mut seq: u32 = 0;
+
+    while !stop.load(Ordering::Relaxed) {
+        match read_frame(&mut fifo, &mut buf, &stop) {
+            Ok(true) => {}
+            Ok(false) => break, // asked to stop mid-frame
+            Err(e) => return Err(e).context("read frame from capture FIFO"),
+        }
+
+        let force = idr_wanted.swap(false, Ordering::Relaxed);
+        for (data, is_idr) in enc.encode(&buf, force)? {
+            if is_idr {
+                if let Some(cfg) = extract_parameter_sets(&data) {
+                    if let Ok(mut slot) = codec_config.lock() {
+                        if slot.as_ref() != Some(&cfg) {
+                            *slot = Some(cfg);
+                        }
+                    }
+                }
+            }
+            if tx.receiver_count() > 0 {
+                latency.on_encoded(seq);
+                let _ = tx.send(crate::capture::VideoPacket { data, is_idr, seq });
+            }
+            seq = seq.wrapping_add(1);
+        }
+        latency.maybe_report();
+    }
+    Ok(())
+}
+
+/// Fill `buf` completely, tolerating a FIFO that has no data yet and a writer
+/// that has not opened it. Returns false if asked to stop before a whole frame
+/// arrived — a partial frame must never reach the encoder, it would be encoded
+/// as garbage.
+fn read_frame(
+    fifo: &mut std::fs::File,
+    buf: &mut [u8],
+    stop: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> std::io::Result<bool> {
+    use std::io::Read;
+    use std::sync::atomic::Ordering;
+    let mut filled = 0;
+    while filled < buf.len() {
+        if stop.load(Ordering::Relaxed) {
+            return Ok(false);
+        }
+        match fifo.read(&mut buf[filled..]) {
+            Ok(0) => {
+                // No writer attached yet, or it closed between frames. Neither
+                // is fatal: the helper reopens the FIFO when it has something.
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(true)
+}
+
+/// Pull the SPS and PPS out of an Annex B keyframe, so a client that connects
+/// later can be handed them before any frame data.
+fn extract_parameter_sets(au: &[u8]) -> Option<Bytes> {
+    let mut end = None;
+    let mut i = 0;
+    while i + 4 < au.len() {
+        let (hdr, start) = if au[i] == 0 && au[i + 1] == 0 && au[i + 2] == 0 && au[i + 3] == 1 {
+            (4, i)
+        } else if au[i] == 0 && au[i + 1] == 0 && au[i + 2] == 1 {
+            (3, i)
+        } else {
+            i += 1;
+            continue;
+        };
+        match au.get(start + hdr).map(|b| b & 0x1f) {
+            // SPS or PPS: keep going, the parameter sets run together.
+            Some(7) | Some(8) => {
+                i = start + hdr;
+                end = None;
+            }
+            // First non-parameter NAL ends the run.
+            Some(_) => {
+                end = Some(start);
+                break;
+            }
+            None => break,
+        }
+    }
+    let cut = end?;
+    (cut > 0).then(|| Bytes::copy_from_slice(&au[..cut]))
+}

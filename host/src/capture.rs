@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+#[cfg(not(feature = "inproc-encoder"))]
+use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{broadcast, watch};
 use tracing::{error, info, warn};
@@ -14,11 +16,17 @@ const RECONNECT_DELAY_MS: u64 = 2000;
 pub const FIFO_PATH: &str = "/tmp/uscreen_capture.fifo";
 
 
-// H.264 NAL unit types
+// H.264 NAL unit types. Only the CLI path parses the bitstream itself; with the
+// in-process encoder libavcodec hands back one complete access unit per frame.
+#[cfg(not(feature = "inproc-encoder"))]
 const NAL_TYPE_NON_IDR: u8 = 1;
+#[cfg(not(feature = "inproc-encoder"))]
 const NAL_TYPE_IDR: u8 = 5;
+#[cfg(not(feature = "inproc-encoder"))]
 const NAL_TYPE_AUD: u8 = 9;
+#[cfg(not(feature = "inproc-encoder"))]
 const NAL_TYPE_SPS: u8 = 7;
+#[cfg(not(feature = "inproc-encoder"))]
 const NAL_TYPE_PPS: u8 = 8;
 
 /// One H.264 access unit, tagged so the stream server can drop frames
@@ -117,6 +125,12 @@ pub struct CaptureManager {
     /// virtual output unambiguously.
     helper_card: Option<u32>,
     latency: crate::latency::LatencyTracker,
+    /// Set by the stream server when a client attaches. The in-process encoder
+    /// turns the next frame into a keyframe, so a client joining an idle screen
+    /// gets a picture immediately instead of waiting for the scheduled one.
+    /// The CLI encoder has no way to honour this.
+    #[cfg_attr(not(feature = "inproc-encoder"), allow(dead_code))]
+    idr_wanted: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl CaptureManager {
@@ -135,6 +149,7 @@ impl CaptureManager {
             helper_stdout_task: None,
             helper_card: None,
             latency: crate::latency::LatencyTracker::new(),
+            idr_wanted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -142,6 +157,13 @@ impl CaptureManager {
     /// acknowledgements and closes the measurement loop.
     pub fn latency_tracker(&self) -> crate::latency::LatencyTracker {
         self.latency.clone()
+    }
+
+    /// Shared with the stream server so a connecting client can ask for a
+    /// keyframe rather than waiting for one.
+    #[cfg_attr(not(feature = "inproc-encoder"), allow(dead_code))]
+    pub fn idr_request_flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        self.idr_wanted.clone()
     }
 
     pub fn codec_config_arc(&self) -> Arc<Mutex<Option<Bytes>>> {
@@ -500,6 +522,14 @@ impl CaptureManager {
         Ok(())
     }
 
+    /// With the in-process encoder there is no child to spawn; the encode loop
+    /// is started per session instead.
+    #[cfg(feature = "inproc-encoder")]
+    async fn start_encoder(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    #[cfg(not(feature = "inproc-encoder"))]
     async fn start_encoder(&mut self) -> Result<()> {
         // Accept the old gstreamer-style name as an alias
         let encoder = if self.config.encoder == "vaapih264enc" {
@@ -797,31 +827,73 @@ impl CaptureManager {
                 encoder_mode = Some(self.active_mode());
             }
 
-            let child = self.encoder_child.as_mut().unwrap();
-            let mut stdout = child
-                .stdout
-                .take()
-                .ok_or_else(|| anyhow::anyhow!("Encoder has no stdout"))?;
+            // The blocking encode loop cannot be aborted, so it is asked to
+            // stop through a flag; the helper's keepalive guarantees it wakes
+            // from the FIFO read a few times a second to notice.
+            #[cfg(feature = "inproc-encoder")]
+            let stop_encode = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+            // Both encoder paths are driven as one task returning the same
+            // type, because tokio::select! cannot take #[cfg] on its branches
+            // and duplicating every arm to satisfy that would be worse.
+            let mut encode_task: tokio::task::JoinHandle<Result<()>> = {
+                #[cfg(not(feature = "inproc-encoder"))]
+                {
+                    let stdout = self
+                        .encoder_child
+                        .as_mut()
+                        .unwrap()
+                        .stdout
+                        .take()
+                        .ok_or_else(|| anyhow::anyhow!("Encoder has no stdout"))?;
+                    let (tx2, cc, lat) =
+                        (tx.clone(), self.codec_config.clone(), self.latency.clone());
+                    tokio::spawn(async move { Self::read_loop(stdout, tx2, cc, lat).await })
+                }
+                #[cfg(feature = "inproc-encoder")]
+                {
+                    let (w, h) = self.active_mode();
+                    let (name, fps, bitrate, quality) = (
+                        self.config.encoder.clone(),
+                        self.config.fps,
+                        self.config.bitrate,
+                        self.config.quality,
+                    );
+                    let (tx2, cc, idr, stopc, lat) = (
+                        tx.clone(),
+                        self.codec_config.clone(),
+                        self.idr_wanted.clone(),
+                        stop_encode.clone(),
+                        self.latency.clone(),
+                    );
+                    tokio::task::spawn_blocking(move || {
+                        crate::encoder::run(
+                            FIFO_PATH, &name, w, h, fps, bitrate, quality, tx2, cc, idr, stopc,
+                            lat,
+                        )
+                    })
+                }
+            };
 
             let mut settings_changed = false;
             // Distinct from `settings_changed`: the mode moved under us, so the
             // encoder must be rebuilt but the helper and the virtual display
             // are fine and must not be torn down.
             let mut mode_changed = false;
-            // Events that need no restart at all — the encoder keeps running and
-            // its stdout is handed back to the next iteration.
-            let mut resume_same_encoder = false;
             let card = self.helper_card;
+
+            // Events that need no restart at all send us back here without
+            // rebuilding the encoder, which now owns the stream and must not be
+            // torn down for something spurious.
+            #[allow(unused_labels)]
+            'session: loop {
+            let mut resume_same_encoder = false;
             tokio::select! {
-                result = Self::read_loop(
-                    &mut stdout,
-                    tx.clone(),
-                    self.codec_config.clone(),
-                    self.latency.clone(),
-                ) => {
-                    match result {
-                        Ok(_) => info!("Encoder process exited"),
-                        Err(e) => warn!("Encoder error: {}. Restarting...", e),
+                joined = &mut encode_task => {
+                    match joined {
+                        Ok(Ok(_)) => info!("Encoder finished"),
+                        Ok(Err(e)) => warn!("Encoder error: {}. Restarting...", e),
+                        Err(e) => warn!("Encoder task failed: {}. Restarting...", e),
                     }
                 }
                 _ = settings_rx.changed() => {
@@ -866,12 +938,14 @@ impl CaptureManager {
                 }
                 _ = shutdown_rx.changed() => {
                     info!("Shutdown requested — tearing down the capture pipeline");
-                    // Close our read end rather than handing it back. Nothing
-                    // drains it during shutdown, so ffmpeg would block writing
-                    // into a full pipe and never reach its signal handling —
-                    // costing a wasted 1.5s SIGTERM timeout on every stop.
-                    // Closed, it gets EPIPE and exits at once.
-                    drop(stdout);
+                    // Drop the encode task, which closes our read end of the
+                    // pipe. Nothing drains it during shutdown, so ffmpeg would
+                    // otherwise block writing into a full pipe and never reach
+                    // its signal handling — a wasted 1.5s SIGTERM timeout on
+                    // every stop. Closed, it gets EPIPE and exits at once.
+                    #[cfg(feature = "inproc-encoder")]
+                    stop_encode.store(true, std::sync::atomic::Ordering::Relaxed);
+                    encode_task.abort();
                     Self::disable_evdi_display(card).await;
                     self.shutdown().await;
                     return Ok(());
@@ -879,12 +953,21 @@ impl CaptureManager {
             }
 
             if resume_same_encoder {
-                // Hand stdout back so the next iteration keeps reading from the
-                // same still-healthy encoder instead of tearing it down.
-                if let Some(child) = self.encoder_child.as_mut() {
-                    child.stdout = Some(stdout);
-                }
-                continue;
+                // Nothing about the encoder changed, so it keeps running and we
+                // simply go back to waiting on it. The task owns the stream, so
+                // it must not be torn down and rebuilt for a spurious event.
+                continue 'session;
+            }
+
+            // Wind the encoder down before rebuilding it.
+            #[cfg(feature = "inproc-encoder")]
+            {
+                stop_encode.store(true, std::sync::atomic::Ordering::Relaxed);
+                let _ = (&mut encode_task).await;
+            }
+            encode_task.abort();
+
+            break;
             }
 
             // A pipeline that ran for a while was healthy — reset the backoff.
@@ -918,6 +1001,7 @@ impl CaptureManager {
     }
 
     /// Find all NAL start codes in a buffer and return their positions.
+    #[cfg(not(feature = "inproc-encoder"))]
     fn find_start_codes(data: &[u8]) -> Vec<usize> {
         let mut starts = Vec::new();
         let mut i = 0;
@@ -943,6 +1027,7 @@ impl CaptureManager {
         starts
     }
 
+    #[cfg(not(feature = "inproc-encoder"))]
     fn nal_header_offset(data: &[u8], start: usize) -> Option<usize> {
         if start + 4 < data.len()
             && data[start] == 0
@@ -962,8 +1047,9 @@ impl CaptureManager {
         }
     }
 
+    #[cfg(not(feature = "inproc-encoder"))]
     async fn read_loop(
-        stdout: &mut (impl tokio::io::AsyncRead + Unpin),
+        mut stdout: impl tokio::io::AsyncRead + Unpin,
         tx: broadcast::Sender<VideoPacket>,
         codec_config: Arc<Mutex<Option<Bytes>>>,
         latency: crate::latency::LatencyTracker,
@@ -1094,6 +1180,7 @@ impl Drop for CaptureManager {
     }
 }
 
+#[cfg(not(feature = "inproc-encoder"))]
 struct H264AnnexBPacketizer {
     buffer: Vec<u8>,
     pending_access_unit: Vec<u8>,
@@ -1105,6 +1192,7 @@ struct H264AnnexBPacketizer {
     next_seq: u32,
 }
 
+#[cfg(not(feature = "inproc-encoder"))]
 impl H264AnnexBPacketizer {
     fn new() -> Self {
         Self {
@@ -1263,12 +1351,14 @@ impl H264AnnexBPacketizer {
     }
 }
 
+#[cfg(not(feature = "inproc-encoder"))]
 struct ExpGolombReader<'a> {
     data: &'a [u8],
     byte: usize,
     bit: u8,
 }
 
+#[cfg(not(feature = "inproc-encoder"))]
 impl<'a> ExpGolombReader<'a> {
     fn new(data: &'a [u8]) -> Self {
         Self {
@@ -1306,7 +1396,7 @@ impl<'a> ExpGolombReader<'a> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "inproc-encoder")))]
 mod tests {
     use super::*;
 

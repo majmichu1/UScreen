@@ -211,7 +211,8 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     let mut capture_mgr = capture::CaptureManager::new(cap_config);
     let codec_config = capture_mgr.codec_config_arc();
     let latency = capture_mgr.latency_tracker();
-    let stream_srv = stream::StreamServer::new(stream_config, codec_config);
+    let stream_srv =
+        stream::StreamServer::new(stream_config, codec_config, capture_mgr.idr_request_flag());
     let input_srv = input::InputServer::new(input_config, Some(settings_tx.clone()), latency);
 
     // Deliberately shallow. This ring is pure latency when it fills: 256 frames
