@@ -4,7 +4,18 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- connectedDevice, not mediaPlayback: this service exists to keep a USB
+         display link alive, and Android 14+ expects a mediaPlayback service to
+         be backed by real media playback (an active MediaSession).
+
+         A connectedDevice FGS additionally requires one permission from a fixed
+         qualifying list (Bluetooth/NFC/network/USB-accessory); without one,
+         startForeground throws SecurityException and the app dies instantly on
+         launch. CHANGE_NETWORK_STATE is the applicable one while the transport
+         is a TCP socket over adb. Once the USB-accessory transport lands, the
+         accessory connection itself qualifies and this can go. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
@@ -33,7 +44,7 @@
 
         <service
             android:name=".StreamingService"
-            android:foregroundServiceType="mediaPlayback"
+            android:foregroundServiceType="connectedDevice"
             android:exported="false" />
     </application>
 </manifest>

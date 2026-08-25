@@ -43,9 +43,18 @@ class MainActivity : ComponentActivity() {
         // Keep screen on while streaming
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        requestHighestRefreshRate()
+
         prefs = Prefs(this)
         videoReceiver = VideoReceiver()
         touchCapture = TouchCapture()
+
+        // Close the host's latency measurement loop: every acknowledged frame
+        // lets the host time capture→display on its own clock.
+        videoReceiver?.onFrameRendered = { seq, decodeUs ->
+            touchCapture?.sendRendered(seq, decodeUs)
+        }
+        videoReceiver?.streamFps = prefs.fps
 
         // Report the real screen size (landscape-oriented) so the host can
         // size the virtual display to match this tablet exactly.
@@ -56,7 +65,16 @@ class MainActivity : ComponentActivity() {
         if (size.x > 0 && size.y > 0) {
             val w = maxOf(size.x, size.y)
             val h = minOf(size.x, size.y)
-            touchCapture?.setNativeResolution(w, h)
+            // Physical size too: the host puts it in the EDID, and the desktop
+            // derives its DPI — and therefore its default scale — from that.
+            // Paired long-edge-to-long-edge so it matches the w/h above
+            // regardless of the panel's natural orientation.
+            val dm = resources.displayMetrics
+            val mmA = if (dm.xdpi > 1f) size.x / dm.xdpi * 25.4f else 0f
+            val mmB = if (dm.ydpi > 1f) size.y / dm.ydpi * 25.4f else 0f
+            val wMm = maxOf(mmA, mmB).roundToInt()
+            val hMm = minOf(mmA, mmB).roundToInt()
+            touchCapture?.setNativeResolution(w, h, wMm, hMm)
             videoReceiver?.formatWidth = w
             videoReceiver?.formatHeight = h
         }
@@ -70,7 +88,8 @@ class MainActivity : ComponentActivity() {
                     onSurfaceReady = { surfaceView ->
                         videoReceiver?.setSurface(surfaceView)
                         touchCapture?.setSurfaceView(surfaceView)
-                    }
+                    },
+                    onSurfaceDestroyed = { videoReceiver?.onSurfaceDestroyed() }
                 )
             }
         }
@@ -86,6 +105,45 @@ class MainActivity : ComponentActivity() {
         // Enable fullscreen AFTER setContent so DecorView exists
         window.decorView.post {
             enableImmersiveMode()
+        }
+    }
+
+    /**
+     * Ask for the panel's fastest mode.
+     *
+     * Refresh rate is a direct latency cost, not just a smoothness one: a
+     * decoded frame waits for the next vsync before it is visible, so 60Hz adds
+     * up to 16.7ms (~8ms on average) versus 8.3ms (~4ms) at 120Hz. Measured
+     * decode+render was ~14.8ms with the panel at 60Hz.
+     *
+     * This can only ask. Samsung's "Motion smoothness: Standard" setting
+     * (`secure refresh_rate_mode = 0`) caps the panel at 60Hz system-wide and
+     * overrides any app request — switching it to Adaptive is the user's call,
+     * and is worth more latency than any change on the host side.
+     */
+    private fun requestHighestRefreshRate() {
+        try {
+            @Suppress("DEPRECATION")
+            val disp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display
+                else windowManager.defaultDisplay
+            val best = disp?.supportedModes?.maxByOrNull { it.refreshRate } ?: return
+
+            // Reassigning the same LayoutParams instance can be ignored, so
+            // apply the change through an explicit set.
+            val lp = window.attributes
+            lp.preferredDisplayModeId = best.modeId
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                lp.preferredRefreshRate = best.refreshRate
+            }
+            window.attributes = lp
+
+            android.util.Log.i(
+                "UScreen",
+                "Requested display mode ${best.modeId} @ ${best.refreshRate}Hz " +
+                    "(current ${disp.refreshRate}Hz)"
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("UScreen", "Could not request a refresh rate: ${e.message}")
         }
     }
 
@@ -122,6 +180,9 @@ class MainActivity : ComponentActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             enableImmersiveMode()
+            // Re-assert once the window is actually attached: a request made in
+            // onCreate can be dropped before the window exists.
+            requestHighestRefreshRate()
         }
     }
 
@@ -129,8 +190,12 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         videoReceiver?.start()
         touchCapture?.connect()
-        // Re-apply saved settings to the host on every (re)start
-        touchCapture?.sendConfig(prefs.bitrateKbps, prefs.fps)
+        // Only re-assert settings the user actually chose here. Pushing the
+        // tablet's defaults on every start would silently overwrite whatever
+        // was configured in the desktop GUI.
+        if (prefs.hasUserSettings) {
+            touchCapture?.sendConfig(prefs.bitrateKbps, prefs.fps)
+        }
     }
 
     override fun onStop() {
@@ -169,6 +234,7 @@ fun UScreenTheme(content: @Composable () -> Unit) {
 @Composable
 fun UScreenMain(
     onSurfaceReady: (SurfaceView) -> Unit,
+    onSurfaceDestroyed: () -> Unit = {},
     videoReceiver: VideoReceiver? = null,
     touchCapture: TouchCapture? = null,
     prefs: Prefs? = null,
@@ -230,7 +296,9 @@ fun UScreenMain(
                             ) {
                                 onSurfaceReady(this@apply)
                             }
-                            override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {}
+                            override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+                                onSurfaceDestroyed()
+                            }
                         }
                     )
                 }
@@ -293,6 +361,8 @@ fun UScreenMain(
                 onApply = { bitrateKbps, newFps ->
                     prefs?.bitrateKbps = bitrateKbps
                     prefs?.fps = newFps
+                    // From now on the tablet re-asserts these on every connect.
+                    prefs?.hasUserSettings = true
                     touchCapture?.sendConfig(bitrateKbps, newFps)
                 },
                 onDismiss = { showSettings = false }
@@ -371,8 +441,10 @@ private fun SettingsSheet(
     onApply: (bitrateKbps: Int, fps: Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var bitrateMbps by remember { mutableStateOf((prefs?.bitrateKbps ?: 20000) / 1000f) }
-    var fpsChoice by remember { mutableStateOf(prefs?.fps ?: 60) }
+    var bitrateMbps by remember {
+        mutableStateOf((prefs?.bitrateKbps ?: Prefs.DEFAULT_BITRATE_KBPS) / 1000f)
+    }
+    var fpsChoice by remember { mutableStateOf(prefs?.fps ?: Prefs.DEFAULT_FPS) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -395,12 +467,14 @@ private fun SettingsSheet(
             Slider(
                 value = bitrateMbps,
                 onValueChange = { bitrateMbps = it },
-                valueRange = 5f..200f,
-                steps = 38,
+                valueRange = (Prefs.MIN_BITRATE_KBPS / 1000).toFloat()..
+                        (Prefs.MAX_BITRATE_KBPS / 1000).toFloat(),
+                steps = 10,
                 colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent)
             )
             Text(
-                "USB 3.1 Gen 2 supports up to ~200 Mbps. Higher = sharper, lower = smoother on slower cables.",
+                "20 Mbps is plenty for text and UI. Going higher does not look sharper once " +
+                    "the USB link is saturated — it only adds delay.",
                 fontSize = 11.sp,
                 color = Color(0xFF6A6A7E)
             )
@@ -409,7 +483,9 @@ private fun SettingsSheet(
             Text("Frame rate", fontSize = 14.sp, color = Color(0xFFB0B0C0))
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(30, 60, 90, 120).forEach { f ->
+                // 120 is not offered: the generated EDID caps the virtual mode
+                // at 90 Hz, so anything above would be duplicate frames.
+                listOf(30, 60, 90).forEach { f ->
                     FilterChip(
                         selected = fpsChoice == f,
                         onClick = { fpsChoice = f },

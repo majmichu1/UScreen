@@ -1,8 +1,9 @@
 mod capture;
 mod config;
+mod doctor;
 mod edid;
 mod input;
-mod screencap;
+mod latency;
 mod stream;
 mod vdisplay;
 
@@ -53,23 +54,14 @@ struct Cli {
     #[arg(long = "height")]
     height: Option<u32>,
 
-    #[arg(long = "capture-mode", default_value = "evdi")]
-    capture_mode: String,
-
-    #[arg(long = "screen-name", default_value = "DVI-I-9")]
-    screen_name: String,
+    #[arg(long = "quality")]
+    quality: Option<u32>,
 
     #[arg(long = "video-port")]
     video_port: Option<u16>,
 
     #[arg(long = "input-port")]
     input_port: Option<u16>,
-
-    #[arg(long = "tablet-width", default_value_t = 2960)]
-    tablet_width: u32,
-
-    #[arg(long = "tablet-height", default_value_t = 1848)]
-    tablet_height: u32,
 }
 
 #[derive(Subcommand)]
@@ -85,11 +77,8 @@ enum Commands {
     Status,
     /// List available displays
     ListDisplays,
-    /// Setup virtual display
-    SetupVdisplay {
-        #[arg(long = "connector")]
-        connector: Option<String>,
-    },
+    /// Diagnose the whole setup and report what is wrong
+    Doctor,
 }
 
 #[tokio::main]
@@ -105,9 +94,7 @@ async fn main() -> Result<()> {
         Some(Commands::Stop) => stop_daemon().await?,
         Some(Commands::Status) => show_status().await?,
         Some(Commands::ListDisplays) => list_displays().await?,
-        Some(Commands::SetupVdisplay { connector }) => {
-            setup_virtual_display(connector.as_deref()).await?;
-        }
+        Some(Commands::Doctor) => doctor::run().await?,
     }
 
     Ok(())
@@ -125,16 +112,49 @@ fn setup_logging() {
 }
 
 async fn run_daemon(cli: Cli) -> Result<()> {
-    // Write PID file for clean stop/status
     let pid_path = get_pid_path();
-    let pid = std::process::id();
     if let Some(parent) = pid_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+
+    // Refuse to start a second daemon on top of a live one: the PID file is
+    // a single slot, so `uscreen stop` only ever kills the most recently
+    // started process — any earlier instance still running would become
+    // permanently untracked, and both would keep writing/reading the same
+    // EVDI FIFO, corrupting frames and starving the encoder.
+    if let Ok(existing) = std::fs::read_to_string(&pid_path) {
+        if let Ok(existing_pid) = existing.trim().parse::<i32>() {
+            let alive = std::path::Path::new(&format!("/proc/{}", existing_pid)).exists();
+            if alive {
+                anyhow::bail!(
+                    "uscreen daemon already running (PID: {}). Run `uscreen stop` first.",
+                    existing_pid
+                );
+            }
+        }
+    }
+
+    // Write PID file for clean stop/status
+    let pid = std::process::id();
     std::fs::write(&pid_path, pid.to_string())?;
 
     // Settings precedence: CLI flag > config file > built-in default
     let file_cfg = config::FileConfig::load();
+
+    // `load()` clamps unusable values, but leaving the bad number on disk means
+    // the GUI keeps showing it and writes it straight back. Heal the file once,
+    // here, so every tool agrees on what the settings actually are.
+    {
+        let raw: Option<config::FileConfig> = std::fs::read_to_string(config::config_path())
+            .ok()
+            .and_then(|t| toml::from_str(&t).ok());
+        if raw.is_some_and(|r| r != file_cfg) {
+            match file_cfg.save() {
+                Ok(_) => info!("Rewrote out-of-range settings in {:?}", config::config_path()),
+                Err(e) => warn!("Could not rewrite the config file: {}", e),
+            }
+        }
+    }
     let encoder = cli.encoder.clone().unwrap_or(file_cfg.encoder.clone());
     let fps = cli.fps.unwrap_or(file_cfg.fps);
     let bitrate = cli.bitrate.unwrap_or(file_cfg.bitrate);
@@ -142,6 +162,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     let height = cli.height.unwrap_or(file_cfg.height);
     let video_port = cli.video_port.unwrap_or(file_cfg.video_port);
     let input_port = cli.input_port.unwrap_or(file_cfg.input_port);
+    let quality = cli.quality.unwrap_or(file_cfg.quality);
 
     let cap_config = capture::CaptureConfig {
         helper_path: find_helper(&cli.helper),
@@ -151,8 +172,10 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         bitrate,
         width,
         height,
-        capture_mode: cli.capture_mode.clone(),
-        screen_name: cli.screen_name.clone(),
+        quality,
+        // Replaced as soon as the tablet reports its real panel size.
+        width_mm: edid::DEFAULT_WIDTH_MM,
+        height_mm: edid::DEFAULT_HEIGHT_MM,
     };
 
     let stream_config = stream::StreamConfig { video_port };
@@ -161,8 +184,6 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         port: input_port,
         virtual_width: width,
         virtual_height: height,
-        tablet_width: cli.tablet_width,
-        tablet_height: cli.tablet_height,
     };
 
     // Live-tunable settings (from the tablet app or by editing the config
@@ -173,14 +194,23 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         bitrate,
         width,
         height,
+        quality,
+        width_mm: edid::DEFAULT_WIDTH_MM,
+        height_mm: edid::DEFAULT_HEIGHT_MM,
     });
 
     let mut capture_mgr = capture::CaptureManager::new(cap_config);
     let codec_config = capture_mgr.codec_config_arc();
+    let latency = capture_mgr.latency_tracker();
     let stream_srv = stream::StreamServer::new(stream_config, codec_config);
-    let input_srv = input::InputServer::new(input_config, Some(settings_tx.clone()));
+    let input_srv = input::InputServer::new(input_config, Some(settings_tx.clone()), latency);
 
-    let (video_tx, _) = broadcast::channel(256);
+    // Deliberately shallow. This ring is pure latency when it fills: 256 frames
+    // is four seconds of backlog at 60 fps, and a client that fell behind would
+    // dutifully receive all of it instead of skipping to something current.
+    // At 8, `RecvError::Lagged` fires early and the skip-to-newest-IDR path in
+    // the stream server actually gets a chance to run.
+    let (video_tx, _) = broadcast::channel(8);
 
     info!("=== uscreen daemon starting ===");
     info!("  Resolution: {}x{} @ {}fps", width, height, fps);
@@ -189,10 +219,22 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     info!("  Stream port: {}", video_port);
     info!("  Input port: {}", input_port);
 
+    // Tablet presence, published by the ADB monitor. The capture manager
+    // follows it so the virtual display exists exactly while the tablet does.
+    let (tablet_tx, tablet_rx) = watch::channel(false);
+
+    // Cooperative shutdown: the capture task must get a chance to kill and reap
+    // ffmpeg/evdi_helper before the process exits, or they linger holding the
+    // capture FIFO and collide with the next start.
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
     let video_tx_cap = video_tx.clone();
     let settings_rx_cap = settings_rx.clone();
     let cap_handle = tokio::spawn(async move {
-        if let Err(e) = capture_mgr.stream_frames(video_tx_cap, settings_rx_cap).await {
+        if let Err(e) = capture_mgr
+            .stream_frames(video_tx_cap, settings_rx_cap, tablet_rx, shutdown_rx)
+            .await
+        {
             error!("Capture manager failed: {}", e);
         }
     });
@@ -221,6 +263,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
             cfg.bitrate = s.bitrate;
             cfg.width = s.width;
             cfg.height = s.height;
+            cfg.quality = s.quality;
             if let Err(e) = cfg.save() {
                 warn!("Failed to persist settings: {}", e);
             } else {
@@ -233,7 +276,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     // and launch the app whenever it's (re)connected.
     let auto_launch = file_cfg.auto_launch_app;
     let adb_handle = tokio::spawn(async move {
-        adb_monitor(video_port, input_port, auto_launch).await;
+        adb_monitor(video_port, input_port, auto_launch, tablet_tx).await;
     });
 
     println!();
@@ -248,10 +291,28 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     println!("================================================");
     println!();
 
-    signal::ctrl_c().await?;
+    // `uscreen stop` (and the GUI) send SIGTERM, not SIGINT — without a
+    // handler for it, the kernel kills the process with its default
+    // disposition and none of our cleanup (which is what kills the
+    // evdi_helper/ffmpeg children via kill_on_drop) ever runs, orphaning
+    // them to fight over the shared FIFO with the next daemon that starts.
+    let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())?;
+    tokio::select! {
+        _ = signal::ctrl_c() => {}
+        _ = sigterm.recv() => {}
+    }
     info!("Shutting down...");
 
-    cap_handle.abort();
+    // Ask the capture pipeline to wind down, and give it a bounded moment to
+    // actually reap its children before pulling the rug out.
+    let _ = shutdown_tx.send(true);
+    if tokio::time::timeout(std::time::Duration::from_secs(5), cap_handle)
+        .await
+        .is_err()
+    {
+        warn!("Capture pipeline did not stop within 5s");
+    }
+
     stream_handle.abort();
     input_handle.abort();
     adb_handle.abort();
@@ -269,19 +330,24 @@ fn get_pid_path() -> PathBuf {
     PathBuf::from(format!("{}/.local/share/uscreen/uscreen.pid", home))
 }
 
+/// Resolve the helper binary.
+///
+/// An explicitly given `--helper` always wins. It used to lose to the copy in
+/// `~/.local/bin`, so a freshly built helper was silently ignored in favour of
+/// whatever was last installed — the kind of thing that costs an afternoon.
 fn find_helper(path: &PathBuf) -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
-
-    let installed = PathBuf::from(format!("{}/.local/bin/evdi_helper", home));
-    if installed.exists() {
-        return installed;
-    }
 
     if path.exists() {
         if let Ok(canon) = path.canonicalize() {
             return canon;
         }
         return path.clone();
+    }
+
+    let installed = PathBuf::from(format!("{}/.local/bin/evdi_helper", home));
+    if installed.exists() {
+        return installed;
     }
 
     let alt = PathBuf::from("host/evdi/evdi_helper");
@@ -315,64 +381,114 @@ fn find_helper(path: &PathBuf) -> PathBuf {
 
 /// Keeps watching for the tablet. On every (re)connect: set up reverse port
 /// forwarding and optionally launch the UScreen app — plug in and it works.
-async fn adb_monitor(video_port: u16, input_port: u16, auto_launch: bool) {
-    let mut was_connected = false;
-    loop {
-        let connected = adb_device_ready().await;
+///
+/// Presence is published on `tablet_tx` so the capture manager can bring the
+/// virtual display up and down along with the tablet.
+async fn adb_monitor(
+    video_port: u16,
+    input_port: u16,
+    auto_launch: bool,
+    tablet_tx: watch::Sender<bool>,
+) {
+    let mut current: Option<String> = None;
 
-        if connected && !was_connected {
-            info!("Tablet connected via USB");
-            match setup_adb_forwarding(video_port, input_port).await {
-                Ok(_) => {
-                    info!("ADB port forwarding set up ({}, {})", video_port, input_port);
-                    if auto_launch {
-                        let r = tokio::process::Command::new("adb")
-                            .args([
-                                "shell",
-                                "am",
-                                "start",
-                                "-n",
-                                "com.uscreen/.MainActivity",
-                            ])
-                            .output()
-                            .await;
-                        match r {
-                            Ok(o) if o.status.success() => info!("UScreen app launched on tablet"),
-                            _ => warn!("Could not auto-launch the app (is it installed?)"),
-                        }
-                    }
-                }
-                Err(e) => warn!("ADB forwarding failed: {}", e),
+    loop {
+        let found = adb_device_serial().await;
+
+        match (&current, &found) {
+            // Newly attached, or a different tablet than before.
+            (None, Some(serial)) => {
+                info!("Tablet connected via USB ({})", serial);
+                on_tablet_connected(serial, video_port, input_port, auto_launch).await;
+                let _ = tablet_tx.send(true);
+                current = found;
             }
-        } else if !connected && was_connected {
-            info!("Tablet disconnected");
+            (Some(old), Some(serial)) if old != serial => {
+                info!("Different tablet connected ({} → {})", old, serial);
+                on_tablet_connected(serial, video_port, input_port, auto_launch).await;
+                let _ = tablet_tx.send(true);
+                current = found;
+            }
+            (Some(old), None) => {
+                info!("Tablet disconnected ({})", old);
+                let _ = tablet_tx.send(false);
+                current = None;
+            }
+            _ => {}
         }
 
-        was_connected = connected;
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     }
 }
 
-async fn adb_device_ready() -> bool {
-    match tokio::process::Command::new("adb")
-        .args(["get-state"])
-        .output()
-        .await
-    {
-        Ok(out) => String::from_utf8_lossy(&out.stdout).trim() == "device",
-        Err(_) => false,
+async fn on_tablet_connected(
+    serial: &str,
+    video_port: u16,
+    input_port: u16,
+    auto_launch: bool,
+) {
+    match setup_adb_forwarding(serial, video_port, input_port).await {
+        Ok(_) => {
+            info!("ADB port forwarding set up ({}, {})", video_port, input_port);
+            if auto_launch {
+                let r = tokio::process::Command::new("adb")
+                    .args([
+                        "-s",
+                        serial,
+                        "shell",
+                        "am",
+                        "start",
+                        "-n",
+                        "com.uscreen/.MainActivity",
+                    ])
+                    .output()
+                    .await;
+                match r {
+                    Ok(o) if o.status.success() => info!("UScreen app launched on tablet"),
+                    _ => warn!("Could not auto-launch the app (is it installed?)"),
+                }
+            }
+        }
+        Err(e) => warn!("ADB forwarding failed: {}", e),
     }
 }
 
-async fn setup_adb_forwarding(video_port: u16, input_port: u16) -> Result<()> {
+/// Serial of the first fully-online device, or `None`.
+///
+/// Deliberately not `adb get-state`: that command fails outright with
+/// "more than one device/emulator" as soon as a second device (a phone, an
+/// emulator) is attached, which used to turn plug-and-play off with no
+/// indication of why.
+async fn adb_device_serial() -> Option<String> {
+    let out = tokio::process::Command::new("adb")
+        .arg("devices")
+        .output()
+        .await
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .skip(1) // "List of devices attached"
+        .find_map(|line| {
+            let mut parts = line.split_whitespace();
+            let serial = parts.next()?;
+            let state = parts.next()?;
+            (state == "device").then(|| serial.to_string())
+        })
+}
+
+async fn setup_adb_forwarding(serial: &str, video_port: u16, input_port: u16) -> Result<()> {
     for port in [video_port, input_port] {
         let arg = format!("tcp:{}", port);
         let r = tokio::process::Command::new("adb")
-            .args(["reverse", &arg, &arg])
+            .args(["-s", serial, "reverse", &arg, &arg])
             .output()
             .await?;
         if !r.status.success() {
-            anyhow::bail!("adb reverse {} failed", arg);
+            anyhow::bail!(
+                "adb reverse {} failed: {}",
+                arg,
+                String::from_utf8_lossy(&r.stderr).trim()
+            );
         }
     }
     Ok(())
@@ -485,29 +601,6 @@ async fn list_displays() -> Result<()> {
     {
         println!("--- PipeWire ---");
         println!("{}", String::from_utf8_lossy(&out.stdout));
-    }
-    Ok(())
-}
-
-async fn setup_virtual_display(connector: Option<&str>) -> Result<()> {
-    let _ = connector;
-    println!("=== Virtual Display Setup ===");
-    let helper_path = PathBuf::from("host/evdi/evdi_helper");
-    let cfg = config::FileConfig::load();
-    let edid_path = edid::ensure_edid(cfg.width, cfg.height, 60)?;
-    let mut vd = vdisplay::VirtualDisplayManager::new(
-        find_helper(&helper_path).as_path(),
-        edid_path.as_path(),
-    );
-    match vd.create().await {
-        Ok(name) => {
-            println!("EVDI virtual display created: {}", name);
-            println!("Press Ctrl+C to remove it.");
-            signal::ctrl_c().await?;
-        }
-        Err(e) => {
-            eprintln!("Failed to create virtual display: {}", e);
-        }
     }
     Ok(())
 }

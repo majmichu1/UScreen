@@ -3,6 +3,9 @@ package com.uscreen
 import android.util.Log
 import android.view.MotionEvent
 import android.view.SurfaceView
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.*
 import okhttp3.*
 import org.json.JSONObject
@@ -28,9 +31,16 @@ class TouchCapture {
     @Volatile private var nativeWidth = 0
     @Volatile private var nativeHeight = 0
 
-    fun setNativeResolution(width: Int, height: Int) {
+    /** Physical panel size in millimetres, so the host can build an EDID that
+     *  reports the true DPI and the desktop comes up at a sane scale. */
+    @Volatile private var nativeWidthMm = 0
+    @Volatile private var nativeHeightMm = 0
+
+    fun setNativeResolution(width: Int, height: Int, widthMm: Int = 0, heightMm: Int = 0) {
         nativeWidth = width
         nativeHeight = height
+        nativeWidthMm = widthMm
+        nativeHeightMm = heightMm
     }
 
     private val client = OkHttpClient.Builder()
@@ -49,9 +59,14 @@ class TouchCapture {
                     put("type", "resolution")
                     put("width", nativeWidth)
                     put("height", nativeHeight)
+                    if (nativeWidthMm > 0 && nativeHeightMm > 0) {
+                        put("width_mm", nativeWidthMm)
+                        put("height_mm", nativeHeightMm)
+                    }
                 }
                 webSocket.send(res.toString())
-                Log.i(TAG, "Reported native resolution: ${nativeWidth}x${nativeHeight}")
+                Log.i(TAG, "Reported native resolution: ${nativeWidth}x${nativeHeight} " +
+                        "(${nativeWidthMm}x${nativeHeightMm} mm)")
             }
             pendingConfig?.let { webSocket.send(it.toString()) }
         }
@@ -90,10 +105,10 @@ class TouchCapture {
             when (event.actionMasked) {
                 MotionEvent.ACTION_HOVER_ENTER,
                 MotionEvent.ACTION_HOVER_MOVE -> {
-                    if (isStylus(event, 0)) sendPenEvent(event, 0, 3, vw, vh)
+                    if (isPenLike(event, 0)) sendPenEvent(event, 0, 3, vw, vh)
                 }
                 MotionEvent.ACTION_HOVER_EXIT -> {
-                    if (isStylus(event, 0)) sendPenProximityExit()
+                    if (isPenLike(event, 0)) sendPenProximityExit()
                 }
             }
             true
@@ -140,28 +155,51 @@ class TouchCapture {
                 if (event.getToolType(actionIndex) == 6 /* TOOL_TYPE_PALM, API 29+ */) {
                     return true
                 }
-                if (isStylus(event, actionIndex)) {
+                if (isPenLike(event, actionIndex)) {
                     sendPenEvent(event, actionIndex, 0, vw, vh)
                 } else {
                     sendTouch(event.getX(actionIndex) / vw,
                         event.getY(actionIndex) / vh,
                         event.getPressure(actionIndex).toDouble(),
-                        0, actionIndex)
+                        0, slotOf(event, actionIndex))
                 }
             }
 
             MotionEvent.ACTION_MOVE -> {
                 for (i in 0 until pointerCount) {
                     if (event.getToolType(i) == 6 /* TOOL_TYPE_PALM, API 29+ */) continue
-                    if (isStylus(event, i)) {
+                    if (isPenLike(event, i)) {
+                        // Android batches several samples between frames.
+                        // Forward the historical points too, otherwise fast
+                        // pen strokes look jagged in GIMP.
+                        val hist = event.historySize
+                        for (h in 0 until hist) {
+                            val hx = event.getHistoricalX(i, h) / vw
+                            val hy = event.getHistoricalY(i, h) / vh
+                            val hp = event.getHistoricalPressure(i, h).toDouble()
+                            val (htx, hty) = decomposeTilt(
+                                getHistoricalAxis(event, MotionEvent.AXIS_TILT, i, h),
+                                getHistoricalAxis(event, MotionEvent.AXIS_ORIENTATION, i, h))
+                            emitPen(hx.toDouble(), hy.toDouble(), hp, htx, hty,
+                                isEraser(event, i), 2)
+                        }
                         sendPenEvent(event, i, 2, vw, vh)
                     } else {
                         sendTouch(event.getX(i) / vw,
                             event.getY(i) / vh,
                             event.getPressure(i).toDouble(),
-                            2, i)
+                            2, slotOf(event, i))
                     }
                 }
+            }
+
+            // S-Pen side button. Fired as a discrete event while hovering or
+            // drawing; forwarded as the stylus button (right-click in GIMP).
+            MotionEvent.ACTION_BUTTON_PRESS -> {
+                if (isPenLike(event, event.actionIndex)) sendPenButton(true)
+            }
+            MotionEvent.ACTION_BUTTON_RELEASE -> {
+                if (isPenLike(event, event.actionIndex)) sendPenButton(false)
             }
 
             MotionEvent.ACTION_UP,
@@ -169,12 +207,12 @@ class TouchCapture {
                 if (event.getToolType(actionIndex) == 6 /* TOOL_TYPE_PALM, API 29+ */) {
                     return true
                 }
-                if (isStylus(event, actionIndex)) {
+                if (isPenLike(event, actionIndex)) {
                     sendPenEvent(event, actionIndex, 1, vw, vh)
                 } else {
                     sendTouch(event.getX(actionIndex) / vw,
                         event.getY(actionIndex) / vh,
-                        0.0, 1, actionIndex)
+                        0.0, 1, slotOf(event, actionIndex))
                 }
             }
 
@@ -183,36 +221,104 @@ class TouchCapture {
                     if (event.getToolType(i) == 6 /* TOOL_TYPE_PALM, API 29+ */) continue
                     sendTouch(event.getX(i) / vw,
                         event.getY(i) / vh,
-                        0.0, 1, i)
+                        0.0, 1, slotOf(event, i))
                 }
             }
         }
         return true
     }
 
-    private fun isStylus(event: MotionEvent, index: Int): Boolean {
+    /**
+     * Multitouch slot for a pointer, derived from its stable pointer *id*.
+     *
+     * The pointer *index* must not be used here: Android repacks indices
+     * whenever a finger lifts, so with two fingers down, lifting the first
+     * renumbers the second from index 1 to index 0. The host would then see
+     * slot 1 released while slot 0 keeps moving under a different finger, and
+     * pinch and two-finger scroll come apart. The pointer id stays with the
+     * finger for the whole gesture.
+     *
+     * Clamped to the 10 slots the uinput touchscreen declares.
+     */
+    private fun slotOf(event: MotionEvent, index: Int): Int {
         return try {
-            event.getToolType(index) == MotionEvent.TOOL_TYPE_STYLUS
+            event.getPointerId(index).coerceIn(0, 9)
+        } catch (_: Exception) {
+            index.coerceIn(0, 9)
+        }
+    }
+
+    /** Stylus or its eraser end — both drive the pen/tablet device. */
+    private fun isPenLike(event: MotionEvent, index: Int): Boolean {
+        return try {
+            val t = event.getToolType(index)
+            t == MotionEvent.TOOL_TYPE_STYLUS || t == MotionEvent.TOOL_TYPE_ERASER
         } catch (_: Exception) {
             false
         }
     }
 
+    private fun isEraser(event: MotionEvent, index: Int): Boolean {
+        return try {
+            event.getToolType(index) == MotionEvent.TOOL_TYPE_ERASER
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun getAxis(event: MotionEvent, axis: Int, index: Int): Double {
+        return try {
+            event.getAxisValue(axis, index).toDouble()
+        } catch (_: Exception) {
+            0.0
+        }
+    }
+
+    private fun getHistoricalAxis(event: MotionEvent, axis: Int, index: Int, hist: Int): Double {
+        return try {
+            event.getHistoricalAxisValue(axis, index, hist).toDouble()
+        } catch (_: Exception) {
+            0.0
+        }
+    }
+
+    /**
+     * Decompose Android's stylus tilt into X/Y tilt angles, **in degrees**.
+     *
+     * Android exposes AXIS_TILT as the angle from the screen normal (0 =
+     * perpendicular, π/2 = flat) and AXIS_ORIENTATION as the azimuth of the
+     * tilt around that normal (0..2π). A Wacom-style ABS_TILT_X/Y device wants
+     * the signed X and Y tilt *angles*, which are the arctangents of the tilt
+     * vector's components projected onto the surface — not the components
+     * themselves.
+     *
+     * The previous version returned the raw projections `sin(tilt)·cos(orient)`
+     * (a dimensionless value in [-1,1]) and the host multiplied them by
+     * 180/π as if they were radians. A pen laid flat at 90° came out as 57°,
+     * and everything in between was wrong non-linearly.
+     */
+    private fun decomposeTilt(tiltRad: Double, orientationRad: Double): Pair<Double, Double> {
+        val sinTilt = sin(tiltRad)
+        val cosTilt = cos(tiltRad)
+        val tx = atan2(sinTilt * cos(orientationRad), cosTilt)
+        val ty = atan2(sinTilt * sin(orientationRad), cosTilt)
+        return Math.toDegrees(tx) to Math.toDegrees(ty)
+    }
+
     private fun sendPenEvent(event: MotionEvent, index: Int, action: Int,
-                             vw: Float, vh: Float) {
+                              vw: Float, vh: Float) {
         val x = event.getX(index) / vw
         val y = event.getY(index) / vh
         val pressure = event.getPressure(index).toDouble()
+        val (tiltX, tiltY) = decomposeTilt(
+            getAxis(event, MotionEvent.AXIS_TILT, index),
+            getAxis(event, MotionEvent.AXIS_ORIENTATION, index))
+        emitPen(x.toDouble(), y.toDouble(), pressure, tiltX, tiltY,
+            isEraser(event, index), action)
+    }
 
-        var tiltX = 0.0
-        var tiltY = 0.0
-        try {
-            tiltX = event.getAxisValue(MotionEvent.AXIS_TILT, index).toDouble()
-        } catch (_: Exception) {}
-        try {
-            tiltY = event.getAxisValue(MotionEvent.AXIS_ORIENTATION, index).toDouble()
-        } catch (_: Exception) {}
-
+    private fun emitPen(x: Double, y: Double, pressure: Double,
+                        tiltX: Double, tiltY: Double, eraser: Boolean, action: Int) {
         val msg = JSONObject().apply {
             put("type", "pen")
             put("x", x)
@@ -220,7 +326,23 @@ class TouchCapture {
             put("pressure", pressure.coerceIn(0.0, 1.0))
             put("tilt_x", tiltX)
             put("tilt_y", tiltY)
+            put("eraser", eraser)
             put("action", action)
+        }
+        webSocket?.send(msg.toString())
+    }
+
+    private fun sendPenButton(down: Boolean) {
+        val msg = JSONObject().apply {
+            put("type", "pen")
+            put("x", 0.0)
+            put("y", 0.0)
+            put("pressure", 0.0)
+            put("tilt_x", 0.0)
+            put("tilt_y", 0.0)
+            put("eraser", false)
+            // 5 = stylus button down, 6 = stylus button up
+            put("action", if (down) 5 else 6)
         }
         webSocket?.send(msg.toString())
     }
@@ -233,6 +355,7 @@ class TouchCapture {
             put("pressure", 0.0)
             put("tilt_x", 0.0)
             put("tilt_y", 0.0)
+            put("eraser", false)
             put("action", 4) // HOVER_EXIT / pen left proximity
         }
         webSocket?.send(msg.toString())
@@ -267,6 +390,26 @@ class TouchCapture {
             webSocket?.send(msg.toString())
             Log.i(TAG, "Sent config: $msg")
         }
+    }
+
+    /**
+     * Tell the host that frame [seq] is on screen. The host started the clock
+     * when it emitted that frame, so the round trip it computes is the real
+     * end-to-end latency without either side needing a shared time base.
+     */
+    fun sendRendered(seq: Int, decodeUs: Int) {
+        if (!isConnected) return
+        val msg = JSONObject().apply {
+            put("type", "rendered")
+            // Sent unsigned: the host's counter is a u32 and Kotlin's Int is
+            // signed, so it wraps negative after ~2^31 frames (~1 year at
+            // 60 fps, but free to get right).
+            put("seq", seq.toLong() and 0xFFFFFFFFL)
+            // How much of the round trip was spent here (arrival → on screen).
+            // The host subtracts it to see what the wire actually costs.
+            if (decodeUs >= 0) put("decode_us", decodeUs)
+        }
+        webSocket?.send(msg.toString())
     }
 
     fun isControlConnected(): Boolean = isConnected

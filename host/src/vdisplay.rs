@@ -1,91 +1,82 @@
-use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
-use tracing::{error, info};
+//! Discovery of the EVDI virtual display through sysfs.
 
-pub struct VirtualDisplayManager {
-    child: Option<Child>,
-    edid_path: PathBuf,
-    helper_path: PathBuf,
-    card: Option<u32>,
+/// DRM card indices backed by the EVDI driver, read from sysfs.
+///
+/// Matching on the connector name alone ("contains DVI") is not safe: a real
+/// DVI monitor on a dock produces exactly the same name pattern, and acting on
+/// it would enable/move the user's physical screen instead of ours.
+pub fn evdi_cards() -> Vec<u32> {
+    let mut cards = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/sys/devices/platform") else {
+        return cards;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.starts_with("evdi.") {
+            continue;
+        }
+        let Ok(drm) = std::fs::read_dir(entry.path().join("drm")) else {
+            continue;
+        };
+        for card in drm.flatten() {
+            if let Some(idx) = card
+                .file_name()
+                .to_str()
+                .and_then(|n| n.strip_prefix("card"))
+                .and_then(|n| n.parse::<u32>().ok())
+            {
+                cards.push(idx);
+            }
+        }
+    }
+    cards.sort_unstable();
+    cards.dedup();
+    cards
 }
 
-impl VirtualDisplayManager {
-    pub fn new(helper_path: &Path, edid_path: &Path) -> Self {
-        Self {
-            child: None,
-            edid_path: edid_path.into(),
-            helper_path: helper_path.into(),
-            card: None,
+/// A DRM connector belonging to an EVDI card, e.g. `DVI-I-1`.
+/// The name is exactly what KWin/kscreen-doctor calls the output.
+pub struct EvdiConnector {
+    pub name: String,
+    pub card: u32,
+    pub connected: bool,
+}
+
+/// Enumerate the connectors of every EVDI card. Used to address the virtual
+/// display unambiguously instead of guessing from the output name.
+pub fn evdi_connectors() -> Vec<EvdiConnector> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/sys/class/drm") else {
+        return out;
+    };
+    let cards = evdi_cards();
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else { continue };
+        // Entries look like "card2-DVI-I-1"; the part after the dash is the
+        // connector name the compositor uses.
+        let Some((card_part, connector)) = name.split_once('-') else {
+            continue;
+        };
+        let Some(idx) = card_part
+            .strip_prefix("card")
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if !cards.contains(&idx) {
+            continue;
         }
+        let connected = std::fs::read_to_string(entry.path().join("status"))
+            .map(|s| s.trim() == "connected")
+            .unwrap_or(false);
+        out.push(EvdiConnector {
+            name: connector.to_string(),
+            card: idx,
+            connected,
+        });
     }
-
-    pub async fn create(&mut self) -> Result<String> {
-        let mut cmd = Command::new("sudo");
-        cmd.arg(&self.helper_path)
-            .args(["--edid", &self.edid_path.to_string_lossy()])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .stdin(Stdio::null())
-            .kill_on_drop(true);
-
-        let mut child = cmd
-            .spawn()
-            .context("Failed to spawn evdi-helper (needs sudo for EVDI device access)")?;
-
-        let stdout = child
-            .stdout
-            .take()
-            .context("Failed to capture evdi-helper stdout")?;
-        let reader = BufReader::new(stdout);
-        let mut lines = reader.lines();
-
-        let mut card_num = None;
-        let timeout = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            while let Some(line) = lines.next_line().await.transpose() {
-                let line = line?;
-                if let Some(card_str) = line.strip_prefix("EVDI_CONNECTED card") {
-                    card_num = Some(card_str.parse::<u32>()?);
-                    info!(
-                        "EVDI virtual display connected on card{}",
-                        card_num.unwrap()
-                    );
-                    break;
-                }
-            }
-            anyhow::Ok(card_num)
-        })
-        .await;
-
-        match timeout {
-            Ok(Ok(Some(card))) => {
-                self.card = Some(card);
-                self.child = Some(child);
-                Ok(format!("DVI-I-{}", card))
-            }
-            Ok(Ok(None)) => {
-                error!("evdi-helper exited without reporting connection");
-                anyhow::bail!("evdi-helper failed to connect");
-            }
-            Ok(Err(e)) => {
-                error!("evdi-helper communication error: {}", e);
-                anyhow::bail!("evdi-helper communication error: {}", e);
-            }
-            Err(_) => {
-                error!("evdi-helper timed out (10s)");
-                child.kill().await?;
-                anyhow::bail!("evdi-helper timed out");
-            }
-        }
-    }
-
-    pub fn card(&self) -> Option<u32> {
-        self.card
-    }
-
-    pub fn display_name(&self) -> Option<String> {
-        self.card.map(|c| format!("DVI-I-{}", c))
-    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
 }

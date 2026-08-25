@@ -14,8 +14,24 @@ fn encode_manufacturer_id(s: &[u8; 3]) -> (u8, u8) {
     (byte8 as u8, byte9 as u8)
 }
 
+/// Physical size assumed when the tablet has not reported its own, in mm.
+/// Roughly a 14.6" 16:10 panel.
+pub const DEFAULT_WIDTH_MM: u32 = 310;
+pub const DEFAULT_HEIGHT_MM: u32 = 194;
+
 /// Build a 128-byte EDID with a single detailed timing descriptor.
-pub fn make_edid(width: u32, height: u32, refresh: u32) -> Vec<u8> {
+///
+/// `width_mm`/`height_mm` are the panel's real physical size. They matter more
+/// than they look: the compositor derives DPI from them, and that is what KDE
+/// uses to pick a default scale factor. A wrong size means the desktop comes up
+/// at the wrong scale on every fresh connection.
+pub fn make_edid_sized(
+    width: u32,
+    height: u32,
+    refresh: u32,
+    width_mm: u32,
+    height_mm: u32,
+) -> Vec<u8> {
     let mut edid = vec![0u8; 128];
 
     // Header
@@ -36,13 +52,16 @@ pub fn make_edid(width: u32, height: u32, refresh: u32) -> Vec<u8> {
     edid[19] = 4; // revision
 
     edid[20] = 0xA5; // Digital, 8 bpc, DVI
-    edid[21] = 31; // max image size cm
-    edid[22] = 19;
+    edid[21] = (width_mm / 10).clamp(1, 255) as u8; // max image size, cm
+    edid[22] = (height_mm / 10).clamp(1, 255) as u8;
     edid[23] = 0x78; // gamma 2.2
     edid[24] = 0xEE; // RGB, DPMS
 
-    // Chromaticity (sRGB)
-    edid[25..34].copy_from_slice(&[0xEF, 0x2C, 0xA2, 0xEE, 0xEF, 0x2C, 0xA2, 0x44, 0x42]);
+    // Chromaticity (sRGB). Bytes 25..=34 inclusive — ten of them; the previous
+    // nine-byte copy left the last one zeroed.
+    edid[25..35].copy_from_slice(&[
+        0xEE, 0x91, 0xA3, 0x54, 0x4C, 0x99, 0x26, 0x0F, 0x50, 0x54,
+    ]);
 
     // No established timings; standard timings unused
     for i in 0..8 {
@@ -63,8 +82,8 @@ pub fn make_edid(width: u32, height: u32, refresh: u32) -> Vec<u8> {
     let pixel_clock_10khz = ((h_total as u64 * v_total as u64 * refresh as u64 + 5000) / 10000)
         .min(u16::MAX as u64) as u16;
 
-    let h_image = 310u32; // mm
-    let v_image = 194u32;
+    let h_image = width_mm;
+    let v_image = height_mm;
 
     // === DTD 1 (bytes 54-71) ===
     let i = 54;
@@ -112,17 +131,55 @@ pub fn make_edid(width: u32, height: u32, refresh: u32) -> Vec<u8> {
     edid
 }
 
-/// Write (or reuse) a generated EDID for this resolution and return its path.
-pub fn ensure_edid(width: u32, height: u32, refresh: u32) -> Result<PathBuf> {
+/// Build an EDID at the default physical size.
+#[cfg(test)]
+pub fn make_edid(width: u32, height: u32, refresh: u32) -> Vec<u8> {
+    make_edid_sized(width, height, refresh, DEFAULT_WIDTH_MM, DEFAULT_HEIGHT_MM)
+}
+
+/// Bumped whenever the generator changes. It is part of the cache filename so
+/// that fixing a bug here actually reaches existing installs — without it, a
+/// stale file from a previous version would be reused forever.
+const EDID_GENERATION: u32 = 2;
+
+/// Write (or reuse) a generated EDID for this mode and return its path.
+pub fn ensure_edid_sized(
+    width: u32,
+    height: u32,
+    refresh: u32,
+    width_mm: u32,
+    height_mm: u32,
+) -> Result<PathBuf> {
     let home = std::env::var("HOME").unwrap_or_default();
     let dir = PathBuf::from(home).join(".local/share/uscreen/edid");
     std::fs::create_dir_all(&dir).context("create EDID dir")?;
-    let path = dir.join(format!("auto-{}x{}@{}.bin", width, height, refresh));
+    let path = dir.join(format!(
+        "auto-v{}-{}x{}@{}-{}x{}mm.bin",
+        EDID_GENERATION, width, height, refresh, width_mm, height_mm
+    ));
     if !path.exists() {
-        std::fs::write(&path, make_edid(width, height, refresh)).context("write EDID")?;
-        tracing::info!("Generated EDID for {}x{}@{} at {:?}", width, height, refresh, path);
+        std::fs::write(
+            &path,
+            make_edid_sized(width, height, refresh, width_mm, height_mm),
+        )
+        .context("write EDID")?;
+        tracing::info!(
+            "Generated EDID for {}x{}@{} ({}x{}mm) at {:?}",
+            width,
+            height,
+            refresh,
+            width_mm,
+            height_mm,
+            path
+        );
     }
     Ok(path)
+}
+
+/// Write (or reuse) a generated EDID at the default physical size.
+#[allow(dead_code)]
+pub fn ensure_edid(width: u32, height: u32, refresh: u32) -> Result<PathBuf> {
+    ensure_edid_sized(width, height, refresh, DEFAULT_WIDTH_MM, DEFAULT_HEIGHT_MM)
 }
 
 #[cfg(test)]

@@ -5,7 +5,11 @@ After=network.target graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/uscreen --helper %h/.local/bin/evdi_helper --edid %h/.local/share/uscreen/edid/s9ultra.bin
+# No --edid here on purpose: passing one pins the virtual display to a single
+# baked-in resolution and disables auto-resolution, so the display would stop
+# following the tablet. Without it the daemon generates an EDID at runtime for
+# whatever resolution is configured or reported.
+ExecStart=%h/.local/bin/uscreen --helper %h/.local/bin/evdi_helper start
 ExecStop=%h/.local/bin/uscreen stop
 Restart=on-failure
 RestartSec=3

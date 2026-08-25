@@ -35,3 +35,16 @@ host/evdi/evdi_helper
 # Temporary files
 /tmp/
 *.fifo
+
+# Local tooling and notes — not part of the project
+.claude/
+.cursor/
+.aider*
+.windsurf/
+.vscode/
+.idea/
+CLAUDE.md
+AGENTS.md
+.env
+.env.*
+*.local

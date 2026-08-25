@@ -38,15 +38,38 @@ class StreamingService : Service() {
             .setOngoing(true)
             .build()
 
-        startForeground(NOTIFICATION_ID, notification)
+        // Never let this kill the app. The foreground service only helps the
+        // process survive backgrounding — streaming itself does not depend on
+        // it, so a platform rejection (the FGS type rules change between
+        // Android releases) must degrade, not crash.
+        try {
+            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            android.util.Log.e(
+                "UScreenService",
+                "startForeground rejected: ${e.message}. Continuing without it.",
+                e
+            )
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
-        // Acquire partial wake lock to prevent CPU sleep
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "UScreen::StreamingWakeLock"
-        )
-        wakeLock?.acquire(4 * 60 * 60 * 1000L) // 4 hours max
+        // Acquire a partial wake lock to prevent CPU sleep.
+        //
+        // Guarded against re-entry: onStartCommand runs again on every
+        // startService call and on every START_STICKY restart, and the previous
+        // version replaced the field each time without releasing the old lock,
+        // leaking one wake lock per restart.
+        if (wakeLock?.isHeld != true) {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "UScreen::StreamingWakeLock"
+            ).apply {
+                setReferenceCounted(false)
+                acquire(4 * 60 * 60 * 1000L) // 4 hours max
+            }
+        }
 
         return START_STICKY
     }

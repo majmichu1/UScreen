@@ -16,6 +16,7 @@ struct FileConfig {
     bitrate: u32,
     width: u32,
     height: u32,
+    quality: u32,
     auto_resolution: bool,
     video_port: u16,
     input_port: u16,
@@ -30,6 +31,7 @@ impl Default for FileConfig {
             bitrate: 20000,
             width: 2960,
             height: 1848,
+            quality: DEFAULT_QUALITY,
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,
@@ -43,12 +45,29 @@ fn config_path() -> PathBuf {
     PathBuf::from(home).join(".config/uscreen/config.toml")
 }
 
+// Kept in sync with `host/src/config.rs`. TODO: share that module instead of
+// mirroring it here — the duplication is what let these drift in the first place.
+const MAX_BITRATE_KBPS: u32 = 60_000;
+const MIN_BITRATE_KBPS: u32 = 1_000;
+const MAX_FPS: u32 = 90;
+const MIN_FPS: u32 = 10;
+const DEFAULT_QUALITY: u32 = 18;
+const MIN_QUALITY: u32 = 12;
+const MAX_QUALITY: u32 = 32;
+
 impl FileConfig {
     fn load() -> Self {
-        std::fs::read_to_string(config_path())
+        let mut cfg: Self = std::fs::read_to_string(config_path())
             .ok()
             .and_then(|t| toml::from_str(&t).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // Older installs persisted 200 Mbps / 90 fps pushed from the tablet.
+        // Without this the GUI would display that value and write it straight
+        // back on the next save.
+        cfg.bitrate = cfg.bitrate.clamp(MIN_BITRATE_KBPS, MAX_BITRATE_KBPS);
+        cfg.fps = cfg.fps.clamp(MIN_FPS, MAX_FPS);
+        cfg.quality = cfg.quality.clamp(MIN_QUALITY, MAX_QUALITY);
+        cfg
     }
 
     fn save(&self) -> std::io::Result<()> {
@@ -175,13 +194,20 @@ fn start_daemon() -> Result<(), String> {
     let _ = std::fs::create_dir_all(&log_dir);
     let log = std::fs::File::create(log_dir.join("daemon.log")).map_err(|e| e.to_string())?;
     let log_err = log.try_clone().map_err(|e| e.to_string())?;
-    Command::new(bin)
+    let mut child = Command::new(bin)
         .arg("start")
         .stdout(log)
         .stderr(log_err)
         .stdin(std::process::Stdio::null())
         .spawn()
         .map_err(|e| format!("Failed to start daemon: {}", e))?;
+    // The daemon detaches and keeps running in the background, but the
+    // std::process::Child handle must still be waited on or the kernel
+    // leaves a zombie behind once it exits. Reap it on a background thread
+    // instead of blocking the GUI.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
     Ok(())
 }
 
@@ -414,23 +440,60 @@ impl eframe::App for App {
                         });
                     ui.end_row();
 
-                    ui.label("Bitrate");
-                    ui.horizontal(|ui| {
-                        let mut mbps = self.cfg.bitrate as f32 / 1000.0;
+                    ui.label("Quality");
+                    ui.vertical(|ui| {
+                        // Shown the intuitive way round — dragging right means
+                        // sharper — while the stored value is the encoder's
+                        // quantiser, where lower is better.
+                        let mut sharpness =
+                            (MAX_QUALITY - self.cfg.quality.clamp(MIN_QUALITY, MAX_QUALITY)) as f32;
+                        let span = (MAX_QUALITY - MIN_QUALITY) as f32;
                         if ui
-                            .add(egui::Slider::new(&mut mbps, 5.0..=200.0).suffix(" Mbps"))
+                            .add(egui::Slider::new(&mut sharpness, 0.0..=span).show_value(false))
+                            .changed()
+                        {
+                            self.cfg.quality = MAX_QUALITY - sharpness.round() as u32;
+                        }
+                        ui.label(
+                            egui::RichText::new(
+                                "This, not the bitrate, sets how sharp text looks",
+                            )
+                            .weak()
+                            .size(11.0),
+                        );
+                    });
+                    ui.end_row();
+
+                    ui.label("Bitrate ceiling");
+                    ui.vertical(|ui| {
+                        let mut mbps = self.cfg.bitrate as f32 / 1000.0;
+                        // Capped at what the USB transport actually sustains:
+                        // past that the encoder just outruns the link and the
+                        // extra bits turn into queueing delay, not sharpness.
+                        if ui
+                            .add(egui::Slider::new(&mut mbps, 5.0..=60.0).suffix(" Mbps"))
                             .changed()
                         {
                             self.cfg.bitrate = (mbps * 1000.0) as u32;
                         }
+                        ui.label(
+                            egui::RichText::new(
+                                "Only a cap for bursts — a desktop streams well below it",
+                            )
+                            .weak()
+                            .size(11.0),
+                        );
                     });
                     ui.end_row();
 
                     ui.label("Frame rate");
+                    // 120 is not offered: EDID 1.4 stores the pixel clock in 16
+                    // bits and 2960x1848@120 overflows it, so the virtual mode
+                    // is capped at 90 Hz.
                     egui::ComboBox::from_id_salt("fps")
                         .selected_text(format!("{} fps", self.cfg.fps))
                         .show_ui(ui, |ui| {
-                            for f in [30u32, 60, 90, 120] {
+                            for f in [30u32, 60, 90] {
                                 ui.selectable_value(&mut self.cfg.fps, f, format!("{} fps", f));
                             }
                         });
