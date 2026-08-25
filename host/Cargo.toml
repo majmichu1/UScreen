@@ -4,7 +4,16 @@ version = "0.1.0"
 edition = "2021"
 description = "Low-latency USB display server - turns your Android tablet into a second monitor"
 
+[features]
+# In-process encoding through libavcodec instead of piping raw frames into an
+# ffmpeg child process. Off by default on purpose: it needs the ffmpeg
+# development headers at build time, which not every distribution installs by
+# default and which atomic distributions make awkward. The CLI path stays the
+# supported default so the project builds anywhere.
+inproc-encoder = ["ffmpeg-next"]
+
 [dependencies]
+ffmpeg-next = { version = "9", optional = true }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 tracing = "0.1"

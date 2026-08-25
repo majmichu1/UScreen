@@ -156,6 +156,34 @@ make dist   # → dist/uscreen-<version>-linux-x86_64.tar.gz + dist/.../uscreen.
 
 Upload both files to a GitHub release.
 
+## Building with the in-process encoder (optional)
+
+By default the daemon pipes raw frames into an `ffmpeg` child process, which
+needs no build-time dependencies beyond Rust and gcc. The `inproc-encoder`
+feature encodes through libavcodec instead, removing that process boundary:
+
+```bash
+cargo build --release --features inproc-encoder
+```
+
+It needs the ffmpeg development headers (`ffmpeg-devel` on Fedora,
+`libavcodec-dev libavformat-dev libavutil-dev` on Debian/Ubuntu). On atomic
+distributions such as Bazzite or Silverblue, where layering development
+packages is awkward, build inside a container instead — the resulting binary
+links against the host's ffmpeg libraries and runs on the host unchanged:
+
+```bash
+distrobox create --name uscreen-tools --image registry.fedoraproject.org/fedora:latest
+distrobox enter uscreen-tools -- sudo dnf install -y \
+    libavcodec-free-devel libavutil-free-devel libavformat-free-devel \
+    libswscale-free-devel libswresample-free-devel libavfilter-free-devel \
+    libavdevice-free-devel clang gcc
+distrobox enter uscreen-tools -- cargo build --release --features inproc-encoder
+```
+
+The `-free` headers are fine here: they declare the same API, and at runtime the
+binary uses whichever ffmpeg the host has installed.
+
 ## Performance Tuning
 
 ### NVIDIA GPUs (NVENC) — recommended

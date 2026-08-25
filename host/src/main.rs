@@ -2,6 +2,8 @@ mod capture;
 mod config;
 mod doctor;
 mod edid;
+#[cfg(feature = "inproc-encoder")]
+mod encoder;
 mod input;
 mod latency;
 mod stream;
