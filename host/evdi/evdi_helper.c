@@ -743,6 +743,19 @@ static void run_event_loop(evdi_handle handle) {
         int timeout_ms;
         if (!g_have_mode) {
             timeout_ms = 100;
+        } else if (g_update_pending) {
+            /* Waiting for update_ready. The capture deadline below has already
+               passed and cannot advance until the request completes, so
+               deriving a timeout from it yields 0 forever and poll returns
+               instantly — the loop then burns a whole core. This is not a
+               rare state: disabling the virtual output leaves a mode set with
+               nothing rendering to it, which is exactly what happens when the
+               tablet is unplugged or switched to pen-only.
+               Sleep until the watchdog is due instead. update_ready wakes poll
+               the moment it arrives, so nothing is delayed when the
+               compositor is actually running. */
+            long long left = last_request_ms + 250 - now_ms();
+            timeout_ms = left < 0 ? 0 : (left > 250 ? 250 : (int)left);
         } else {
             long long due = last_request_ms + request_period_ms;
             timeout_ms = (int)(due - now_ms());
