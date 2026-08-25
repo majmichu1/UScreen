@@ -124,9 +124,14 @@ Settings live in `~/.config/uscreen/config.toml` and can be changed from three p
 
 The tablet's touch device is a real touchscreen as far as the desktop is
 concerned, so KDE would pop its virtual keyboard up over whatever you are
-working on. The daemon turns it off while it runs and puts the setting back on
-exit — including after being killed rather than stopped, since the previous
-value is saved to disk rather than kept in memory.
+working on. The daemon turns it off while it runs and puts the setting back on exit —
+including after being killed rather than stopped, since the previous value is
+saved to disk rather than kept in memory.
+
+Worth knowing if you go looking: writing `VirtualKeyboardMode` into `kwinrc`
+does not work. KWin does not re-read that file, so the value on disk and the
+one actually in force disagree, and the keyboard keeps appearing. The property
+on `org.kde.kwin.VirtualKeyboard` over D-Bus is what takes effect.
 
 ### Graphics tablet mode
 

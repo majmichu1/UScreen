@@ -1,74 +1,92 @@
 //! Suppressing the desktop's on-screen keyboard while uscreen is running.
 //!
 //! The tablet's touch device is a genuine touchscreen as far as the desktop is
-//! concerned, so KDE pops the virtual keyboard up whenever a text field is
-//! focused by touch or pen. On a screen you are using as a monitor — or that
-//! you are only drawing on — that is never what you want.
+//! concerned, so KDE offers the virtual keyboard whenever a text field takes
+//! focus. On a screen being used as a monitor — or one you are only drawing on
+//! — that is never wanted.
 //!
-//! The setting is global to the desktop, so it is saved before being changed
-//! and put back on shutdown: a display server should not leave the user's
-//! session altered after it exits. The saved value lives in a file rather than
-//! in memory so that a daemon which was killed rather than stopped can still be
-//! undone by the next run.
+//! Done over KWin's D-Bus interface rather than by writing kwinrc. Writing the
+//! config file looks like the obvious route and does change the value on disk,
+//! but KWin does not re-read it: verified by setting `VirtualKeyboardMode=0` in
+//! the file and finding the live property still reporting 1, with the keyboard
+//! duly appearing. Setting the property takes effect immediately, and has the
+//! further advantage of leaving the user's saved configuration untouched.
+//!
+//! The previous value still goes to disk, so a daemon that was killed rather
+//! than stopped can be undone by the next run.
 
 use std::path::PathBuf;
 use tracing::{info, warn};
 
-const GROUP: &str = "Wayland";
-const KEY_ENABLED: &str = "VirtualKeyboardEnabled";
-const KEY_MODE: &str = "VirtualKeyboardMode";
+const OBJECT: &str = "/VirtualKeyboard";
+const IFACE: &str = "org.kde.kwin.VirtualKeyboard";
+/// Only when explicitly asked for, rather than on touch input.
+const MODE_MANUAL: &str = "0";
 
 fn state_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
     PathBuf::from(home).join(".local/share/uscreen/osk-restore")
 }
 
-async fn read_key(key: &str) -> Option<String> {
-    let out = tokio::process::Command::new("kreadconfig6")
-        .args(["--file", "kwinrc", "--group", GROUP, "--key", key])
+async fn get_mode() -> Option<String> {
+    let out = tokio::process::Command::new("qdbus")
+        .args([
+            "--literal",
+            "org.kde.KWin",
+            OBJECT,
+            "org.freedesktop.DBus.Properties.Get",
+            IFACE,
+            "mode",
+        ])
         .output()
         .await
         .ok()?;
-    let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!v.is_empty()).then_some(v)
+    let text = String::from_utf8_lossy(&out.stdout);
+    // qdbus --literal prints e.g. [Variant(int): 1]
+    let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
+    (!digits.is_empty()).then_some(digits)
 }
 
-async fn write_key(key: &str, value: &str) -> bool {
-    tokio::process::Command::new("kwriteconfig6")
-        .args(["--file", "kwinrc", "--group", GROUP, "--key", key, value])
+async fn set_mode(mode: &str) -> bool {
+    tokio::process::Command::new("qdbus")
+        .args([
+            "--literal",
+            "org.kde.KWin",
+            OBJECT,
+            "org.freedesktop.DBus.Properties.Set",
+            IFACE,
+            "mode",
+            mode,
+        ])
         .output()
         .await
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
 
-async fn reconfigure_kwin() {
-    let _ = tokio::process::Command::new("qdbus")
-        .args(["org.kde.KWin", "/KWin", "org.kde.KWin.reconfigure"])
-        .output()
-        .await;
-}
-
-/// Turn the on-screen keyboard off, remembering what it was set to.
+/// Turn the on-screen keyboard off, remembering how it was set.
 pub async fn disable() {
     let path = state_path();
-    // A state file already present means a previous run did not get to restore.
-    // Keep that older value: it is the one that reflects what the user chose,
-    // whereas the current setting is whatever we left behind.
+    // A state file already present means a previous run never restored. Keep
+    // that value: it is the user's, whereas the current one is ours.
     if !path.exists() {
-        let enabled = read_key(KEY_ENABLED).await.unwrap_or_else(|| "true".into());
-        let mode = read_key(KEY_MODE).await.unwrap_or_else(|| "1".into());
+        let Some(current) = get_mode().await else {
+            warn!("KWin's virtual keyboard interface is unavailable — leaving it alone");
+            return;
+        };
+        if current == MODE_MANUAL {
+            return; // Already how we want it; nothing to remember or undo.
+        }
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Err(e) = std::fs::write(&path, format!("{}\n{}\n", enabled, mode)) {
-            warn!("Could not save the on-screen keyboard setting: {}", e);
-            return; // Without a way back, leave the user's desktop alone.
+        if std::fs::write(&path, &current).is_err() {
+            warn!("Could not save the keyboard setting — leaving it alone");
+            return; // Without a way back, do not touch the user's desktop.
         }
     }
 
-    if write_key(KEY_ENABLED, "false").await {
-        reconfigure_kwin().await;
+    if set_mode(MODE_MANUAL).await {
         info!("On-screen keyboard suppressed while uscreen runs");
     }
 }
@@ -79,12 +97,9 @@ pub async fn restore() {
     let Ok(saved) = std::fs::read_to_string(&path) else {
         return;
     };
-    let mut lines = saved.lines();
-    let enabled = lines.next().unwrap_or("true");
-    let mode = lines.next().unwrap_or("1");
-    write_key(KEY_ENABLED, enabled).await;
-    write_key(KEY_MODE, mode).await;
-    reconfigure_kwin().await;
+    let saved = saved.trim();
+    if !saved.is_empty() && set_mode(saved).await {
+        info!("On-screen keyboard setting restored");
+    }
     let _ = std::fs::remove_file(&path);
-    info!("On-screen keyboard setting restored");
 }

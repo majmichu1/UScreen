@@ -391,14 +391,24 @@ async fn check_virtual_display(r: &mut Report, cfg: &FileConfig) {
 /// Reported because it is a global desktop setting, not something the daemon
 /// should quietly decide on the user's behalf.
 async fn check_osk(r: &mut Report) {
-    let Some(mode) = output_of(
-        "kreadconfig6",
-        &["--file", "kwinrc", "--group", "Wayland", "--key", "VirtualKeyboardMode"],
+    // The live value, not the one in kwinrc: KWin does not re-read that file,
+    // so the two disagree routinely and only this one reflects what happens.
+    let Some(raw) = output_of(
+        "qdbus",
+        &[
+            "--literal",
+            "org.kde.KWin",
+            "/VirtualKeyboard",
+            "org.freedesktop.DBus.Properties.Get",
+            "org.kde.kwin.VirtualKeyboard",
+            "mode",
+        ],
     )
     .await
     else {
         return;
     };
+    let mode: String = raw.chars().filter(|c| c.is_ascii_digit()).collect();
     match mode.trim() {
         "1" | "2" => {
             r.line(
@@ -406,10 +416,7 @@ async fn check_osk(r: &mut Report) {
                 "on-screen keyboard",
                 "pops up on touch input",
             );
-            r.hint(
-                "kwriteconfig6 --file kwinrc --group Wayland --key VirtualKeyboardMode 0 \
-                 (0 = only when you ask for it; undo with 1)",
-            );
+            r.hint("the daemon turns this off while it runs and puts it back on exit");
         }
         "0" => r.line(Level::Ok, "on-screen keyboard", "only when asked for"),
         _ => {}
