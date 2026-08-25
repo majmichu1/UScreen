@@ -386,6 +386,24 @@ async fn check_virtual_display(r: &mut Report, cfg: &FileConfig) {
     }
 }
 
+/// Whether plugging the cable in is actually enough on its own.
+async fn check_autostart(r: &mut Report) {
+    match output_of("systemctl", &["--user", "is-enabled", "uscreen.service"]).await {
+        Some(v) if v.trim() == "enabled" => {
+            r.line(Level::Ok, "start with the desktop", "enabled");
+        }
+        Some(_) => {
+            r.line(
+                Level::Warn,
+                "start with the desktop",
+                "disabled — the daemon must be started by hand",
+            );
+            r.hint("systemctl --user enable --now uscreen.service");
+        }
+        None => {}
+    }
+}
+
 /// Colour accuracy, for using the tablet to judge images rather than just to
 /// hold windows. Everything here is a setting rather than a bug, but each one
 /// silently ruins colour and none of them is visible from the host side.
@@ -528,6 +546,9 @@ pub async fn run() -> Result<()> {
 
     section("Virtual display");
     check_virtual_display(&mut r, &cfg).await;
+
+    section("Autostart");
+    check_autostart(&mut r).await;
 
     section("Colour");
     check_colour(&mut r).await;

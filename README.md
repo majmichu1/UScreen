@@ -97,7 +97,10 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 
 ```bash
 # 1. Enable USB debugging on your tablet (Settings → Developer Options)
-# 2. Start the daemon (or click Start in uscreen-gui):
+# 2. Have UScreen start with your desktop, so plugging in is all it takes
+#    (or tick "Start UScreen with the desktop" in uscreen-gui):
+systemctl --user enable --now uscreen.service
+# ...or start it just for this session:
 uscreen start
 # 3. Plug in the USB-C cable — that's it.
 #    The daemon forwards the ADB ports and launches the app on the tablet.
@@ -294,6 +297,7 @@ sudo modprobe evdi
 - [x] Touch/S-Pen mapped to the virtual display, not the whole desktop
 - [x] `uscreen doctor` diagnostics
 - [x] End-to-end latency measurement
+- [x] Starts with the desktop — plug the cable in and it works
 - [ ] System tray icon
 - [ ] Wi-Fi mode (fallback)
 - [ ] Multi-monitor support

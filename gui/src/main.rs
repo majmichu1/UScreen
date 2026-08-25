@@ -82,6 +82,29 @@ impl FileConfig {
     }
 }
 
+/// Whether the systemd user service is enabled, i.e. whether plugging the
+/// cable in is enough on its own.
+fn autostart_enabled() -> bool {
+    Command::new("systemctl")
+        .args(["--user", "is-enabled", "uscreen.service"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "enabled")
+        .unwrap_or(false)
+}
+
+fn set_autostart(on: bool) -> Result<(), String> {
+    let verb = if on { "enable" } else { "disable" };
+    let out = Command::new("systemctl")
+        .args(["--user", verb, "--now", "uscreen.service"])
+        .output()
+        .map_err(|e| format!("systemctl failed: {}", e))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
 #[derive(Default, Clone)]
 struct Status {
     daemon_running: bool,
@@ -92,6 +115,7 @@ struct Status {
     evdi_count: i32,
     ffmpeg_ok: bool,
     adb_ok: bool,
+    autostart: bool,
 }
 
 fn home() -> String {
@@ -138,6 +162,7 @@ fn poll_status() -> Status {
         .and_then(|t| t.trim().parse::<i32>().ok())
         .unwrap_or(-1);
     s.ffmpeg_ok = command_exists("ffmpeg");
+    s.autostart = autostart_enabled();
     s.adb_ok = command_exists("adb");
 
     if let Ok(pid_str) = std::fs::read_to_string(pid_path()) {
@@ -567,10 +592,28 @@ impl eframe::App for App {
                     ui.end_row();
 
                     ui.label("Plug & play");
-                    ui.checkbox(
-                        &mut self.cfg.auto_launch_app,
-                        "Open the app on the tablet automatically",
-                    );
+                    ui.vertical(|ui| {
+                        ui.checkbox(
+                            &mut self.cfg.auto_launch_app,
+                            "Open the app on the tablet automatically",
+                        );
+                        let mut auto = status.autostart;
+                        if ui
+                            .checkbox(&mut auto, "Start UScreen with the desktop")
+                            .changed()
+                        {
+                            match set_autostart(auto) {
+                                Ok(_) => {
+                                    self.message = if auto {
+                                        "Autostart on — plugging the cable in is now enough".into()
+                                    } else {
+                                        "Autostart off".into()
+                                    }
+                                }
+                                Err(e) => self.message = e,
+                            }
+                        }
+                    });
                     ui.end_row();
                 });
 

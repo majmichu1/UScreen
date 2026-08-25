@@ -1,7 +1,11 @@
 [Unit]
 Description=UScreen - USB Second Display Server
-Documentation=https://github.com/uscreen/uscreen
-After=network.target graphical-session.target
+Documentation=https://github.com/majmichu1/UScreen
+# Bound to the desktop session rather than to login: the daemon talks to the
+# compositor (to place the virtual output and to map the tablet's touch and pen
+# onto it), so starting before KWin exists would leave it retrying for nothing.
+After=graphical-session.target
+PartOf=graphical-session.target
 
 [Service]
 Type=simple
@@ -17,4 +21,4 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
