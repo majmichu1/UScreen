@@ -18,6 +18,7 @@ struct FileConfig {
     height: u32,
     quality: u32,
     stream_scale: u32,
+    pen_only: bool,
     auto_resolution: bool,
     video_port: u16,
     input_port: u16,
@@ -34,6 +35,7 @@ impl Default for FileConfig {
             height: 1848,
             quality: DEFAULT_QUALITY,
             stream_scale: 1,
+            pen_only: false,
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,
@@ -562,6 +564,24 @@ impl eframe::App for App {
                                 .size(11.0),
                             );
                         }
+                    });
+                    ui.end_row();
+
+                    ui.label("Mode");
+                    ui.vertical(|ui| {
+                        ui.checkbox(
+                            &mut self.cfg.pen_only,
+                            "Graphics tablet instead of a second screen",
+                        );
+                        ui.label(
+                            egui::RichText::new(
+                                "Nothing is streamed: the pen drives this machine's own \
+                                 screen, so there is no display latency at all. Pressure, \
+                                 tilt and the eraser still work.",
+                            )
+                            .weak()
+                            .size(11.0),
+                        );
                     });
                     ui.end_row();
 

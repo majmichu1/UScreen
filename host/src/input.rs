@@ -161,11 +161,16 @@ pub struct InputResponse {
     pub status: String,
     pub width: u32,
     pub height: u32,
+    /// Tells the tablet not to expect a video stream: it is acting as a
+    /// graphics tablet for the host's own screen, not as a display.
+    pub pen_only: bool,
 }
 
 #[derive(Clone)]
 pub struct InputConfig {
     pub port: u16,
+    /// Map the devices onto the laptop's screen rather than the virtual one.
+    pub pen_only: bool,
     pub virtual_width: u32,
     pub virtual_height: u32,
 }
@@ -174,6 +179,7 @@ impl Default for InputConfig {
     fn default() -> Self {
         Self {
             port: 8891,
+            pen_only: false,
             virtual_width: 2960,
             virtual_height: 1848,
         }
@@ -552,6 +558,35 @@ impl InjectDevices {
 
 const KWIN_INPUT_IFACE: &str = "org.kde.KWin.InputDevice";
 
+/// The screen the user is actually looking at: the first enabled output that is
+/// not one of ours. In pen-only mode the tablet drives this one, so the pen has
+/// to be mapped onto it rather than onto the virtual display.
+async fn primary_non_evdi_output() -> Option<String> {
+    let evdi: Vec<String> = crate::vdisplay::evdi_connectors()
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    let out = tokio::process::Command::new("kscreen-doctor")
+        .arg("-j")
+        .output()
+        .await
+        .ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let outputs = v.get("outputs")?.as_array()?;
+    let mut fallback = None;
+    for o in outputs {
+        let name = o.get("name").and_then(|v| v.as_str())?.to_string();
+        if evdi.contains(&name) || !o.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false) {
+            continue;
+        }
+        if o.get("primary").and_then(|v| v.as_bool()).unwrap_or(false) {
+            return Some(name);
+        }
+        fallback.get_or_insert(name);
+    }
+    fallback
+}
+
 async fn kwin_device_property(sysname: &str, property: &str) -> Option<String> {
     let out = tokio::process::Command::new("qdbus")
         .args([
@@ -589,16 +624,29 @@ async fn kwin_device_property(sysname: &str, property: &str) -> Option<String> {
 /// and finding it empty, both when written before and after device creation.
 /// Setting the property directly takes effect immediately, and KWin persists it
 /// itself.
-async fn map_devices_to_output() {
-    let connectors = crate::vdisplay::evdi_connectors();
-    let Some(output) = connectors
-        .iter()
-        .find(|c| c.connected)
-        .or_else(|| connectors.first())
-        .map(|c| c.name.clone())
-    else {
-        warn!("No EVDI output found — touch and pen will address the whole desktop");
-        return;
+async fn map_devices_to_output(pen_only: bool) {
+    let output = if pen_only {
+        match primary_non_evdi_output().await {
+            Some(name) => name,
+            None => {
+                warn!("No physical output found — pen will address the whole desktop");
+                return;
+            }
+        }
+    } else {
+        let connectors = crate::vdisplay::evdi_connectors();
+        match connectors
+            .iter()
+            .find(|c| c.connected)
+            .or_else(|| connectors.first())
+            .map(|c| c.name.clone())
+        {
+            Some(name) => name,
+            None => {
+                warn!("No EVDI output found — touch and pen will address the whole desktop");
+                return;
+            }
+        }
     };
 
     // KWin registers a device slightly after uinput creates it, so retry
@@ -741,7 +789,7 @@ impl InputServer {
         });
         let uinput = Arc::new(std::sync::Mutex::new(devices));
 
-        map_devices_to_output().await;
+        map_devices_to_output(self.config.pen_only).await;
 
         let config = self.config.clone();
         let running = self.running.clone();
@@ -804,6 +852,7 @@ async fn handle_connection(
         status: "connected".to_string(),
         width: config.virtual_width,
         height: config.virtual_height,
+        pen_only: config.pen_only,
     };
 
     ws_sender

@@ -23,6 +23,12 @@ class TouchCapture {
     private var reconnectJob: Job? = null
     private var surfaceView: SurfaceView? = null
 
+    /** Set from the host's greeting: it is using us as a graphics tablet for
+     *  its own screen, so no video will arrive and none should be waited for. */
+    @Volatile var isPenOnly = false
+        private set
+    var onModeKnown: ((penOnly: Boolean) -> Unit)? = null
+
     /** Settings to (re)send to the host whenever the control channel connects */
     @Volatile private var pendingConfig: JSONObject? = null
 
@@ -69,6 +75,22 @@ class TouchCapture {
                         "(${nativeWidthMm}x${nativeHeightMm} mm)")
             }
             pendingConfig?.let { webSocket.send(it.toString()) }
+        }
+
+        override fun onMessage(webSocket: WebSocket, text: String) {
+            // The host greets with its mode; everything else it might say is
+            // ignored, this channel is otherwise ours to talk on.
+            try {
+                val o = JSONObject(text)
+                if (o.has("pen_only")) {
+                    val pen = o.getBoolean("pen_only")
+                    if (pen != isPenOnly) {
+                        isPenOnly = pen
+                        Log.i(TAG, "Host mode: ${if (pen) "pen-only" else "display"}")
+                    }
+                    onModeKnown?.invoke(pen)
+                }
+            } catch (_: Exception) {}
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {

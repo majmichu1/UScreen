@@ -477,6 +477,13 @@ fn check_config(r: &mut Report, cfg: &FileConfig) {
         .ok()
         .and_then(|t| toml::from_str(&t).ok());
     r.line(Level::Ok, "config file", &format!("{}", path.display()));
+    if cfg.pen_only {
+        r.line(
+            Level::Ok,
+            "mode",
+            "graphics tablet — no display is streamed",
+        );
+    }
 
     let raw_bitrate = on_disk.as_ref().map(|c| c.bitrate).unwrap_or(cfg.bitrate);
     if raw_bitrate > MAX_BITRATE_KBPS {

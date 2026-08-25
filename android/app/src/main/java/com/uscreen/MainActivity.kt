@@ -33,6 +33,8 @@ import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
+    /// Mirrors the host's mode so the UI can say what is going on.
+    private var penOnlyMode by mutableStateOf(false)
     private var videoReceiver: VideoReceiver? = null
     private var touchCapture: TouchCapture? = null
     private lateinit var prefs: Prefs
@@ -55,6 +57,12 @@ class MainActivity : ComponentActivity() {
             touchCapture?.sendRendered(seq, decodeUs)
         }
         videoReceiver?.streamFps = prefs.fps
+        touchCapture?.onModeKnown = { penOnly ->
+            runOnUiThread {
+                penOnlyMode = penOnly
+                if (penOnly) videoReceiver?.stop() else videoReceiver?.start()
+            }
+        }
 
         // Report the real screen size (landscape-oriented) so the host can
         // size the virtual display to match this tablet exactly.
@@ -82,6 +90,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             UScreenTheme {
                 UScreenMain(
+                    penOnly = penOnlyMode,
                     videoReceiver = videoReceiver,
                     touchCapture = touchCapture,
                     prefs = prefs,
@@ -188,7 +197,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        videoReceiver?.start()
+        // The video receiver is started only once the host says it is actually
+        // sending a display. In pen-only mode there is nothing to receive and
+        // spinning up a decoder would waste power for no picture.
         touchCapture?.connect()
         // Only re-assert settings the user actually chose here. Pushing the
         // tablet's defaults on every start would silently overwrite whatever
@@ -234,6 +245,7 @@ fun UScreenTheme(content: @Composable () -> Unit) {
 @Composable
 fun UScreenMain(
     onSurfaceReady: (SurfaceView) -> Unit,
+    penOnly: Boolean = false,
     onSurfaceDestroyed: () -> Unit = {},
     videoReceiver: VideoReceiver? = null,
     touchCapture: TouchCapture? = null,
@@ -306,9 +318,20 @@ fun UScreenMain(
             modifier = Modifier.fillMaxSize()
         )
 
+        // Pen-only: there is no picture coming, so say so instead of leaving
+        // the user staring at a "waiting for the host" spinner forever.
+        AnimatedVisibility(
+            visible = penOnly,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            PenOnlyScreen()
+        }
+
         // Connection screen
         AnimatedVisibility(
-            visible = !isConnected,
+            visible = !isConnected && !penOnly,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.fillMaxSize()
@@ -366,6 +389,37 @@ fun UScreenMain(
                     touchCapture?.sendConfig(bitrateKbps, newFps)
                 },
                 onDismiss = { showSettings = false }
+            )
+        }
+    }
+}
+
+@Composable
+private fun PenOnlyScreen() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF0D0D14), Color(0xFF141B2A), Color(0xFF0D0D14))
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Graphics tablet", fontSize = 34.sp, fontWeight = FontWeight.Bold,
+                color = Color.White)
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Draw here — it goes to the screen on your computer.",
+                fontSize = 15.sp, color = AccentSoft, textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(28.dp))
+            Text(
+                "Nothing is streamed to this screen in this mode, so there is no\n" +
+                    "display latency at all. Pressure, tilt and the eraser all work.",
+                fontSize = 13.sp, lineHeight = 22.sp, color = Color(0xFF9A9AAE),
+                textAlign = TextAlign.Center
             )
         }
     }

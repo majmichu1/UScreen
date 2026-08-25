@@ -51,6 +51,12 @@ pub struct FileConfig {
     /// decoder costs roughly 7-8ms fixed plus 1.2ms per megapixel, so fewer
     /// pixels arrive on screen sooner.
     pub stream_scale: u32,
+    /// Use the tablet as a graphics tablet for the laptop's own screen rather
+    /// than as a second display: no capture, no encoding, nothing streamed —
+    /// the pen and touch simply drive the screen you are already looking at.
+    /// For drawing that removes display latency from the loop entirely, which
+    /// is worth more than any amount of tuning the video path.
+    pub pen_only: bool,
     /// Match the virtual display to whatever resolution the tablet reports
     pub auto_resolution: bool,
     pub video_port: u16,
@@ -69,6 +75,7 @@ impl Default for FileConfig {
             height: 1848,
             quality: DEFAULT_QUALITY,
             stream_scale: 1,
+            pen_only: false,
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,

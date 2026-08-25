@@ -63,6 +63,11 @@ struct Cli {
     #[arg(long = "stream-scale")]
     stream_scale: Option<u32>,
 
+    /// Drive the laptop's own screen with the pen instead of streaming a second
+    /// display to the tablet.
+    #[arg(long = "pen-only")]
+    pen_only: bool,
+
     #[arg(long = "video-port")]
     video_port: Option<u16>,
 
@@ -170,6 +175,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     let input_port = cli.input_port.unwrap_or(file_cfg.input_port);
     let quality = cli.quality.unwrap_or(file_cfg.quality);
     let stream_scale = cli.stream_scale.unwrap_or(file_cfg.stream_scale);
+    let pen_only = cli.pen_only || file_cfg.pen_only;
 
     let cap_config = capture::CaptureConfig {
         helper_path: find_helper(&cli.helper),
@@ -190,6 +196,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
 
     let input_config = input::InputConfig {
         port: input_port,
+        pen_only,
         virtual_width: width,
         virtual_height: height,
     };
@@ -238,9 +245,21 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     // capture FIFO and collide with the next start.
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
+    if pen_only {
+        info!("Pen-only mode: no virtual display, no capture, no encoding.");
+        info!("  The tablet drives this machine's own screen with the pen.");
+    }
+
     let video_tx_cap = video_tx.clone();
     let settings_rx_cap = settings_rx.clone();
     let cap_handle = tokio::spawn(async move {
+        let mut shutdown_rx = shutdown_rx;
+        if pen_only {
+            // Nothing to capture: park until shutdown rather than building a
+            // display nobody looks at.
+            let _ = shutdown_rx.changed().await;
+            return;
+        }
         if let Err(e) = capture_mgr
             .stream_frames(video_tx_cap, settings_rx_cap, tablet_rx, shutdown_rx)
             .await

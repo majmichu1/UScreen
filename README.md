@@ -120,6 +120,18 @@ Settings live in `~/.config/uscreen/config.toml` and can be changed from three p
 - **The tablet app** — tap the ⚙ handle in the top-right corner; bitrate and fps apply live
 - **CLI flags** — override the config file for one run (e.g. `uscreen --bitrate 30000 start`)
 
+### Graphics tablet mode
+
+With `pen_only` (a checkbox in `uscreen-gui`, or `--pen-only`) the tablet stops
+being a second screen and becomes a drawing surface for the screen you are
+already looking at, like a Wacom Intuos. Nothing is captured, encoded or
+streamed, and the pen is mapped onto your own display instead of the virtual
+one.
+
+For drawing this removes display latency from the loop entirely — you watch the
+host's screen, which has none — and it costs no CPU at all. Pressure, tilt, the
+eraser and the stylus button all work exactly as they do in display mode.
+
 ### Stream detail vs latency
 
 The desktop always runs at full resolution. `stream_scale` controls only what
@@ -339,6 +351,7 @@ sudo modprobe evdi
 - [x] `uscreen doctor` diagnostics
 - [x] End-to-end latency measurement
 - [x] Starts with the desktop — plug the cable in and it works
+- [x] Graphics tablet mode (pen drives the host's own screen)
 - [ ] System tray icon
 - [ ] Wi-Fi mode (fallback)
 - [ ] Multi-monitor support
