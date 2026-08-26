@@ -461,7 +461,8 @@ impl eframe::App for App {
                     ui.label("Encoder");
                     egui::ComboBox::from_id_salt("encoder")
                         .selected_text(match self.cfg.encoder.as_str() {
-                            "h264_nvenc" => "NVIDIA (NVENC)",
+                            "h264_nvenc" => "NVIDIA H.264 (NVENC)",
+                            "hevc_nvenc" => "NVIDIA HEVC (NVENC)",
                             "h264_vaapi" | "vaapih264enc" => "AMD / Intel (VAAPI)",
                             "libx264" => "CPU (libx264)",
                             other => other,
@@ -470,7 +471,12 @@ impl eframe::App for App {
                             ui.selectable_value(
                                 &mut self.cfg.encoder,
                                 "h264_nvenc".to_string(),
-                                "NVIDIA (NVENC)",
+                                "NVIDIA H.264 (NVENC)",
+                            );
+                            ui.selectable_value(
+                                &mut self.cfg.encoder,
+                                "hevc_nvenc".to_string(),
+                                "NVIDIA HEVC (NVENC)",
                             );
                             ui.selectable_value(
                                 &mut self.cfg.encoder,
@@ -562,6 +568,26 @@ impl eframe::App for App {
                                 ui.selectable_value(&mut self.cfg.position, v.to_string(), label);
                             }
                         });
+                    ui.end_row();
+
+                    ui.label("Colour depth");
+                    ui.vertical(|ui| {
+                        let hevc = self.cfg.encoder.contains("hevc");
+                        ui.add_enabled(
+                            hevc,
+                            egui::Checkbox::new(&mut self.cfg.ten_bit, "10-bit (HEVC Main10)"),
+                        );
+                        ui.label(
+                            egui::RichText::new(if hevc {
+                                "Smooths banding on gradients. The desktop itself is 8-bit, \
+                                 so this adds precision, not colour."
+                            } else {
+                                "Needs the HEVC encoder — H.264 here is 8-bit only."
+                            })
+                            .small()
+                            .weak(),
+                        );
+                    });
                     ui.end_row();
 
                     ui.label("Resolution");
