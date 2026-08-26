@@ -20,6 +20,7 @@ class VideoReceiver {
         const val HOST = "127.0.0.1"
         const val PORT = 8890
         const val MIME_TYPE = "video/avc"
+        const val MIME_TYPE_HEVC = "video/hevc"
         const val TAG = "UScreenVideo"
         const val MAX_FRAME_SIZE = 8 * 1024 * 1024
         const val PACKET_TYPE_CONFIG = 0
@@ -59,6 +60,11 @@ class VideoReceiver {
      * no clock synchronisation between the two devices is needed.
      */
     var onFrameRendered: ((seq: Int, decodeUs: Int) -> Unit)? = null
+
+    /// Which bitstream the host is sending. Set from the host's greeting
+    /// before the stream starts; the frames carry nothing that says which
+    /// codec they are, so guessing wrong means a decoder that never outputs.
+    @Volatile var mimeType: String = MIME_TYPE
 
     private var frameCallbackThread: HandlerThread? = null
     private val renderedCount = AtomicLong(0)
@@ -193,7 +199,7 @@ class VideoReceiver {
 
     private fun setupCodec(surface: Surface): Boolean {
         try {
-            val format = MediaFormat.createVideoFormat(MIME_TYPE, formatWidth, formatHeight)
+            val format = MediaFormat.createVideoFormat(mimeType, formatWidth, formatHeight)
             // Follow the stream's real frame rate rather than a hardcoded
             // guess: telling the decoder 90 when the host sends 60 skews its
             // internal pacing and power/clock decisions.
@@ -223,7 +229,7 @@ class VideoReceiver {
                 format.setInteger("vendor.qti-ext-dec-low-latency.enable", 1)
             } catch (_: Exception) {}
 
-            val codec = MediaCodec.createDecoderByType(MIME_TYPE)
+            val codec = MediaCodec.createDecoderByType(mimeType)
             codec.configure(format, surface, null, 0)
             codec.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT)
 

@@ -28,6 +28,7 @@ class TouchCapture {
     @Volatile var isPenOnly = false
         private set
     var onModeKnown: ((penOnly: Boolean) -> Unit)? = null
+    var onCodecKnown: ((codec: String) -> Unit)? = null
 
     /** Settings to (re)send to the host whenever the control channel connects */
     @Volatile private var pendingConfig: JSONObject? = null
@@ -87,6 +88,9 @@ class TouchCapture {
             // ignored, this channel is otherwise ours to talk on.
             try {
                 val o = JSONObject(text)
+                if (o.has("codec")) {
+                    onCodecKnown?.invoke(o.getString("codec"))
+                }
                 if (o.has("pen_only")) {
                     val pen = o.getBoolean("pen_only")
                     if (pen != isPenOnly) {

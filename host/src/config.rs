@@ -61,6 +61,11 @@ pub struct FileConfig {
     /// "right" (default), "left", "above" or "below". Anything else is
     /// treated as "right" rather than refusing to start over a typo.
     pub position: String,
+    /// Encode in 10 bits (HEVC Main10). The captured desktop is 8-bit and
+    /// cannot be otherwise, so this adds no colour — it gives the encoder
+    /// more precision to work in, which is what removes banding from
+    /// gradients at a given bitrate. Costs a format conversion per frame.
+    pub ten_bit: bool,
     /// Match the virtual display to whatever resolution the tablet reports
     pub auto_resolution: bool,
     pub video_port: u16,
@@ -81,6 +86,7 @@ impl Default for FileConfig {
             stream_scale: 1,
             pen_only: false,
             position: "right".into(),
+            ten_bit: false,
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,

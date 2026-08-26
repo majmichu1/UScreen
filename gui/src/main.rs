@@ -24,6 +24,7 @@ struct FileConfig {
     /// the whole file back, so a field it does not know about is a field it
     /// silently erases.
     position: String,
+    ten_bit: bool,
     auto_resolution: bool,
     video_port: u16,
     input_port: u16,
@@ -42,6 +43,7 @@ impl Default for FileConfig {
             stream_scale: 1,
             pen_only: false,
             position: "right".into(),
+            ten_bit: false,
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,

@@ -169,6 +169,10 @@ pub struct InputResponse {
     pub status: String,
     pub width: u32,
     pub height: u32,
+    /// Which bitstream the tablet should expect: "h264" or "hevc". It has to
+    /// build the decoder before the first frame arrives, and the frames
+    /// themselves carry nothing that identifies the codec.
+    pub codec: String,
     /// Tells the tablet not to expect a video stream: it is acting as a
     /// graphics tablet for the host's own screen, not as a display.
     pub pen_only: bool,
@@ -177,6 +181,8 @@ pub struct InputResponse {
 #[derive(Clone)]
 pub struct InputConfig {
     pub port: u16,
+    /// Bitstream the encoder produces, so connecting clients can be told.
+    pub codec: String,
     pub virtual_width: u32,
     pub virtual_height: u32,
 }
@@ -185,6 +191,7 @@ impl Default for InputConfig {
     fn default() -> Self {
         Self {
             port: 8891,
+            codec: "h264".into(),
             virtual_width: 2960,
             virtual_height: 1848,
         }
@@ -943,6 +950,7 @@ async fn handle_connection(
         status: "connected".to_string(),
         width: config.virtual_width,
         height: config.virtual_height,
+        codec: config.codec.clone(),
         pen_only: *mode_rx.borrow_and_update(),
     };
 
@@ -968,6 +976,7 @@ async fn handle_connection(
                     status: "mode".to_string(),
                     width: config.virtual_width,
                     height: config.virtual_height,
+                    codec: config.codec.clone(),
                     pen_only,
                 };
                 if ws_sender

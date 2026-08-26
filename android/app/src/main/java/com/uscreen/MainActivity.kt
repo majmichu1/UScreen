@@ -3,6 +3,7 @@ package com.uscreen
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.SurfaceView
 import android.view.View
 import android.view.WindowInsetsController
@@ -57,6 +58,25 @@ class MainActivity : ComponentActivity() {
             touchCapture?.sendRendered(seq, decodeUs)
         }
         videoReceiver?.streamFps = prefs.fps
+        touchCapture?.onCodecKnown = { codec ->
+            val mime = if (codec == "hevc") VideoReceiver.MIME_TYPE_HEVC
+                       else VideoReceiver.MIME_TYPE
+            val vr = videoReceiver
+            if (vr != null && vr.mimeType != mime) {
+                runOnUiThread {
+                    // The decoder is built once per streaming session, so a
+                    // codec change has to restart it. This normally fires
+                    // before the first frame and costs nothing; it only
+                    // restarts anything if the host switched codec while
+                    // connected.
+                    Log.i("UScreen", "Host is sending $codec — rebuilding the decoder")
+                    val wasRunning = !penOnlyMode
+                    if (wasRunning) vr.stop()
+                    vr.mimeType = mime
+                    if (wasRunning) vr.start()
+                }
+            }
+        }
         touchCapture?.onModeKnown = { penOnly ->
             runOnUiThread {
                 penOnlyMode = penOnly

@@ -193,12 +193,14 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         height_mm: edid::DEFAULT_HEIGHT_MM,
         stream_scale,
         position: config::Position::parse_or_default(&file_cfg.position),
+        ten_bit: file_cfg.ten_bit,
     };
 
     let stream_config = stream::StreamConfig { video_port };
 
     let input_config = input::InputConfig {
         port: input_port,
+        codec: capture::Codec::from_encoder(&encoder).muxer().to_string(),
         virtual_width: width,
         virtual_height: height,
     };

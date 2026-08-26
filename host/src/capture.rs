@@ -19,6 +19,54 @@ pub const FIFO_PATH: &str = "/tmp/uscreen_capture.fifo";
 // H.264 NAL unit types. Only the CLI path parses the bitstream itself; with the
 // in-process encoder libavcodec hands back one complete access unit per frame.
 #[cfg(not(feature = "inproc-encoder"))]
+/// Which bitstream syntax the packetizer is reading. H.264 and HEVC agree on
+/// Annex B start codes and on nothing else that matters here: the NAL header
+/// is one byte against two, the type lives in different bits, and a keyframe
+/// is a different set of type numbers.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Codec {
+    H264,
+    Hevc,
+}
+
+impl Codec {
+    pub fn from_encoder(name: &str) -> Self {
+        if name.contains("hevc") || name.contains("h265") || name.contains("265") {
+            Codec::Hevc
+        } else {
+            Codec::H264
+        }
+    }
+
+    /// Name for ffmpeg's `-f`, which wants the bitstream format, not the
+    /// encoder.
+    pub fn muxer(self) -> &'static str {
+        match self {
+            Codec::H264 => "h264",
+            Codec::Hevc => "hevc",
+        }
+    }
+}
+
+// HEVC NAL unit types (H.265 Table 7-1). IRAP covers every type that a
+// decoder may start from, not only IDR: a stream may open on a CRA.
+const HEVC_NAL_VCL_MAX: u8 = 31;
+const HEVC_NAL_IRAP_MIN: u8 = 16;
+const HEVC_NAL_IRAP_MAX: u8 = 23;
+const HEVC_NAL_VPS: u8 = 32;
+const HEVC_NAL_SPS: u8 = 33;
+const HEVC_NAL_PPS: u8 = 34;
+const HEVC_NAL_AUD: u8 = 35;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum NalKind {
+    Sps,
+    Pps,
+    Aud,
+    Vcl,
+    Other,
+}
+
 const NAL_TYPE_NON_IDR: u8 = 1;
 #[cfg(not(feature = "inproc-encoder"))]
 const NAL_TYPE_IDR: u8 = 5;
@@ -76,6 +124,7 @@ pub struct CaptureConfig {
     /// Not an encoder setting: changing it moves a window, it does not
     /// restart a stream.
     pub position: crate::config::Position,
+    pub ten_bit: bool,
 }
 
 impl Default for CaptureConfig {
@@ -93,6 +142,7 @@ impl Default for CaptureConfig {
             height_mm: crate::edid::DEFAULT_HEIGHT_MM,
             stream_scale: 1,
             position: crate::config::Position::Right,
+            ten_bit: false,
         }
     }
 }
@@ -636,6 +686,13 @@ impl CaptureManager {
         }
         let fps = self.config.fps;
         let bitrate = self.config.bitrate;
+        let codec = Codec::from_encoder(&encoder);
+        // 10-bit only makes sense on HEVC here: NVENC's H.264 encoder is
+        // 8-bit, so asking for it there would silently do nothing.
+        let ten_bit = self.config.ten_bit && codec == Codec::Hevc;
+        if self.config.ten_bit && !ten_bit {
+            warn!("10-bit was asked for but {} is 8-bit only — ignoring", encoder);
+        }
         // Keyframe every second: enough for fast client joins without
         // burning the whole bitrate budget on IDR frames.
         let gop = fps.max(1);
@@ -676,9 +733,17 @@ impl CaptureManager {
             ]);
         }
 
+        // The FIFO carries 8-bit NV12, so 10-bit encoding needs a conversion
+        // first. Done here rather than in the helper to keep the FIFO format
+        // single: the helper stays the one thing that never has to know which
+        // codec is in use.
+        if ten_bit {
+            encoder_args.extend_from_slice(&["-vf".into(), "format=p010le".into()]);
+        }
+
         encoder_args.extend_from_slice(&["-c:v".into(), encoder.clone()]);
 
-        if encoder == "h264_nvenc" {
+        if encoder.ends_with("_nvenc") {
             let bitrate_m = bitrate as f64 / 1000.0;
             // bufsize = 1 frame of bits: keeps VBV under 1-frame delay.
             let bufsize_k = (bitrate / fps.max(1)).max(200);
@@ -732,6 +797,18 @@ impl CaptureManager {
                 "-forced-idr".into(),
                 "1".into(),
             ]);
+            if ten_bit {
+                // The source is 8-bit — EVDI hands over ARGB8888 and there is
+                // no 10-bit path below us — so this adds no colour the desktop
+                // did not have. What it buys is precision in the encoder's own
+                // arithmetic: quantisation and motion compensation round in
+                // 10 bits instead of 8, which is what smooths the banding that
+                // shows up on gradients at low bitrates.
+                encoder_args.extend_from_slice(&[
+                    "-profile:v".into(),
+                    "main10".into(),
+                ]);
+            }
         } else if encoder == "h264_vaapi" {
             // Constant quality, for the same reason as NVENC above: a static
             // desktop should cost nothing, and the bitrate is only a ceiling.
@@ -769,12 +846,16 @@ impl CaptureManager {
             ]);
         } else {
             anyhow::bail!(
-                "Unknown encoder: {}. Use h264_nvenc, h264_vaapi, or libx264",
+                "Unknown encoder: {}. Use h264_nvenc, hevc_nvenc, h264_vaapi, or libx264",
                 encoder
             );
         }
 
-        encoder_args.extend_from_slice(&["-f".into(), "h264".into(), "pipe:1".into()]);
+        encoder_args.extend_from_slice(&[
+            "-f".into(),
+            codec.muxer().into(),
+            "pipe:1".into(),
+        ]);
 
         let mut cmd = Command::new("ffmpeg");
         cmd.args(&encoder_args)
@@ -927,7 +1008,8 @@ impl CaptureManager {
                         .ok_or_else(|| anyhow::anyhow!("Encoder has no stdout"))?;
                     let (tx2, cc, lat) =
                         (tx.clone(), self.codec_config.clone(), self.latency.clone());
-                    tokio::spawn(async move { Self::read_loop(stdout, tx2, cc, lat).await })
+                    let codec = Codec::from_encoder(&self.config.encoder);
+                    tokio::spawn(async move { Self::read_loop(stdout, tx2, cc, lat, codec).await })
                 }
                 #[cfg(feature = "inproc-encoder")]
                 {
@@ -1133,12 +1215,13 @@ impl CaptureManager {
         tx: broadcast::Sender<VideoPacket>,
         codec_config: Arc<Mutex<Option<Bytes>>>,
         latency: crate::latency::LatencyTracker,
+        codec: Codec,
     ) -> Result<()> {
         let mut buf = vec![0u8; 512 * 1024];
         let mut total: u64 = 0;
         let mut frames: u64 = 0;
         let mut last_log = Instant::now();
-        let mut packetizer = H264AnnexBPacketizer::new();
+        let mut packetizer = H264AnnexBPacketizer::new(codec);
         let mut config_extracted = codec_config.lock().ok().and_then(|g| g.clone()).is_some();
 
         loop {
@@ -1270,11 +1353,12 @@ struct H264AnnexBPacketizer {
     has_sps: bool,
     has_pps: bool,
     next_seq: u32,
+    codec: Codec,
 }
 
 #[cfg(not(feature = "inproc-encoder"))]
 impl H264AnnexBPacketizer {
-    fn new() -> Self {
+    fn new(codec: Codec) -> Self {
         Self {
             buffer: Vec::new(),
             pending_access_unit: Vec::new(),
@@ -1284,6 +1368,7 @@ impl H264AnnexBPacketizer {
             has_sps: false,
             has_pps: false,
             next_seq: 0,
+            codec,
         }
     }
 
@@ -1358,37 +1443,82 @@ impl H264AnnexBPacketizer {
             return;
         }
 
-        let nal_type = nal[header_offset] & 0x1f;
-        match nal_type {
-            NAL_TYPE_SPS => {
+        let (kind, is_key) = match self.codec {
+            Codec::H264 => {
+                let t = nal[header_offset] & 0x1f;
+                let kind = match t {
+                    NAL_TYPE_SPS => NalKind::Sps,
+                    NAL_TYPE_PPS => NalKind::Pps,
+                    NAL_TYPE_AUD => NalKind::Aud,
+                    NAL_TYPE_NON_IDR..=NAL_TYPE_IDR => NalKind::Vcl,
+                    _ => NalKind::Other,
+                };
+                (kind, t == NAL_TYPE_IDR)
+            }
+            Codec::Hevc => {
+                // Two-byte header; the type is bits 1..6 of the first byte.
+                let t = (nal[header_offset] >> 1) & 0x3f;
+                let kind = match t {
+                    HEVC_NAL_VPS | HEVC_NAL_SPS => NalKind::Sps,
+                    HEVC_NAL_PPS => NalKind::Pps,
+                    HEVC_NAL_AUD => NalKind::Aud,
+                    0..=HEVC_NAL_VCL_MAX => NalKind::Vcl,
+                    _ => NalKind::Other,
+                };
+                // Any IRAP picture is a valid place for a decoder to join,
+                // not only an IDR — refusing a CRA would leave a client
+                // waiting for a picture the encoder may never emit.
+                (
+                    kind,
+                    (HEVC_NAL_IRAP_MIN..=HEVC_NAL_IRAP_MAX).contains(&t),
+                )
+            }
+        };
+
+        match kind {
+            NalKind::Sps => {
                 self.has_sps = true;
                 self.config.extend_from_slice(nal);
             }
-            NAL_TYPE_PPS => {
+            NalKind::Pps => {
                 self.has_pps = true;
                 self.config.extend_from_slice(nal);
             }
-            NAL_TYPE_AUD => {
+            NalKind::Aud => {
                 if let Some(access_unit) = self.take_pending_access_unit() {
                     out.push(access_unit);
                 }
                 self.pending_access_unit.extend_from_slice(nal);
             }
-            NAL_TYPE_NON_IDR..=NAL_TYPE_IDR => {
-                if self.pending_has_vcl && Self::first_mb_in_slice(nal, header_offset) == Some(0) {
+            NalKind::Vcl => {
+                if self.pending_has_vcl && self.starts_new_picture(nal, header_offset) {
                     if let Some(access_unit) = self.take_pending_access_unit() {
                         out.push(access_unit);
                     }
                 }
-                if nal_type == NAL_TYPE_IDR {
+                if is_key {
                     self.pending_has_idr = true;
                 }
                 self.pending_access_unit.extend_from_slice(nal);
                 self.pending_has_vcl = true;
             }
-            _ => {
+            NalKind::Other => {
                 self.pending_access_unit.extend_from_slice(nal);
             }
+        }
+    }
+
+    /// Is this slice the first of a new picture?
+    ///
+    /// H.264 answers with `first_mb_in_slice == 0`, which needs the
+    /// exp-Golomb reader. HEVC puts `first_slice_segment_in_pic_flag` in the
+    /// very first bit after its two-byte header, so it is just a bit test.
+    fn starts_new_picture(&self, nal: &[u8], header_offset: usize) -> bool {
+        match self.codec {
+            Codec::H264 => Self::first_mb_in_slice(nal, header_offset) == Some(0),
+            Codec::Hevc => nal
+                .get(header_offset + 2)
+                .is_some_and(|b| b & 0x80 != 0),
         }
     }
 
