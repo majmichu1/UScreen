@@ -261,6 +261,16 @@ async fn check_tablet(r: &mut Report, cfg: &FileConfig) {
         })
         .collect();
 
+    // Which device every later check should address. With more than one
+    // present, a bare `adb shell` fails outright ("more than one
+    // device/emulator") — which is how this check used to report a perfectly
+    // well installed app as missing the moment `adb tcpip` was in use.
+    let chosen: Option<&str> = devices
+        .iter()
+        .find(|d| !d.contains(':'))
+        .or_else(|| devices.first())
+        .copied();
+
     match devices.len() {
         0 => {
             let unauthorized = list.contains("unauthorized");
@@ -273,18 +283,31 @@ async fn check_tablet(r: &mut Report, cfg: &FileConfig) {
             }
             return;
         }
-        1 => r.line(Level::Ok, "tablet", devices[0]),
+        1 => {
+            r.line(Level::Ok, "tablet", devices[0]);
+            report_transport(r, devices[0]);
+        }
         n => {
+            // Usually one tablet reachable two ways rather than two tablets:
+            // `adb tcpip` leaves the cable working alongside the network
+            // device. The daemon prefers the cable, so say which one wins.
+            let pick = chosen.unwrap_or(devices[0]);
             r.line(
-                Level::Warn,
+                Level::Ok,
                 "tablet",
-                &format!("{} devices attached: {:?}", n, devices),
+                &format!("{} reachable {} ways: {:?}", pick, n, devices),
             );
-            r.hint("the daemon picks the first one; unplug the others to be sure");
+            report_transport(r, pick);
         }
     }
+    let dev_args: Vec<String> = match chosen {
+        Some(d) => vec!["-s".into(), d.to_string()],
+        None => Vec::new(),
+    };
 
-    match output_of("adb", &["reverse", "--list"]).await {
+    let mut reverse_args: Vec<&str> = dev_args.iter().map(|s| s.as_str()).collect();
+    reverse_args.extend_from_slice(&["reverse", "--list"]);
+    match output_of("adb", &reverse_args).await {
         Some(reverse) => {
             for port in [cfg.video_port, cfg.input_port] {
                 let needle = format!("tcp:{}", port);
@@ -303,7 +326,9 @@ async fn check_tablet(r: &mut Report, cfg: &FileConfig) {
         None => r.line(Level::Warn, "adb reverse", "could not query"),
     }
 
-    if let Some(out) = output_of("adb", &["shell", "pm", "list", "packages", "com.uscreen"]).await {
+    let mut pm_args: Vec<&str> = dev_args.iter().map(|s| s.as_str()).collect();
+    pm_args.extend_from_slice(&["shell", "pm", "list", "packages", "com.uscreen"]);
+    if let Some(out) = output_of("adb", &pm_args).await {
         if out.contains("com.uscreen") {
             r.line(Level::Ok, "tablet app", "installed");
         } else {
@@ -516,6 +541,16 @@ fn check_config(r: &mut Report, cfg: &FileConfig) {
     r.line(Level::Ok, "config file", &format!("{}", path.display()));
     r.line(
         Level::Ok,
+        "screen position",
+        match cfg.position.as_str() {
+            "left" => "left of the other screens",
+            "above" => "above the other screens",
+            "below" => "below the other screens",
+            _ => "right of the other screens",
+        },
+    );
+    r.line(
+        Level::Ok,
         "mode",
         if cfg.pen_only {
             "graphics tablet — no display is streamed (switchable from the tablet)"
@@ -617,4 +652,16 @@ pub async fn run() -> Result<()> {
         println!("Everything checks out.");
     }
     Ok(())
+}
+
+/// A network serial is `host:port`; a USB serial never contains a colon.
+/// Worth reporting because the two transports differ by far more than the
+/// median suggests — the Wi-Fi tail is several times worse.
+fn report_transport(r: &mut Report, serial: &str) {
+    if serial.contains(':') {
+        r.line(Level::Warn, "transport", "Wi-Fi — expect occasional stutter");
+        r.hint("plug the USB cable in for steady latency; the daemon prefers it automatically");
+    } else {
+        r.line(Level::Ok, "transport", "USB");
+    }
 }

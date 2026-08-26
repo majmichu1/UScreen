@@ -19,6 +19,11 @@ struct FileConfig {
     quality: u32,
     stream_scale: u32,
     pen_only: bool,
+    /// Which side of the desktop the virtual screen sits on. Kept here even
+    /// though this window does not need it for anything else: the GUI writes
+    /// the whole file back, so a field it does not know about is a field it
+    /// silently erases.
+    position: String,
     auto_resolution: bool,
     video_port: u16,
     input_port: u16,
@@ -36,6 +41,7 @@ impl Default for FileConfig {
             quality: DEFAULT_QUALITY,
             stream_scale: 1,
             pen_only: false,
+            position: "right".into(),
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,
@@ -532,6 +538,26 @@ impl eframe::App for App {
                         .show_ui(ui, |ui| {
                             for f in [30u32, 60, 90] {
                                 ui.selectable_value(&mut self.cfg.fps, f, format!("{} fps", f));
+                            }
+                        });
+                    ui.end_row();
+
+                    ui.label("Position");
+                    egui::ComboBox::from_id_salt("position")
+                        .selected_text(match self.cfg.position.as_str() {
+                            "left" => "Left of the other screens",
+                            "above" => "Above the other screens",
+                            "below" => "Below the other screens",
+                            _ => "Right of the other screens",
+                        })
+                        .show_ui(ui, |ui| {
+                            for (v, label) in [
+                                ("right", "Right of the other screens"),
+                                ("left", "Left of the other screens"),
+                                ("above", "Above the other screens"),
+                                ("below", "Below the other screens"),
+                            ] {
+                                ui.selectable_value(&mut self.cfg.position, v.to_string(), label);
                             }
                         });
                     ui.end_row();
