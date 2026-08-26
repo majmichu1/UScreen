@@ -15,6 +15,9 @@ Inspired by SuperDisplay for Windows. Built for Linux (Bazzite, Fedora, Arch, et
 - **Low latency**: event-driven EVDI capture, hardware encoding, IDR-aware frame skipping — the pipeline never lets latency accumulate
 - **Settings UI on both sides**: a desktop GUI (`uscreen-gui`) on Linux, and a settings sheet in the Android app (bitrate / fps changes apply live, no reconnect needed)
 - **Touch & S-Pen** forwarded back to Linux with pressure and tilt
+- **Tray icon** on the desktop: connection state at a glance, and the mode switch without opening anything
+- **Either side of the desktop**: the virtual screen can sit right, left, above or below your real ones
+- **Wi-Fi fallback** when the cable is not an option, with the cost stated rather than glossed over
 
 ## Install (releases)
 
@@ -119,6 +122,54 @@ Settings live in `~/.config/uscreen/config.toml` and can be changed from three p
 - **`uscreen-gui`** — desktop app with status (daemon / tablet), start/stop, and all settings
 - **The tablet app** — tap the ⚙ handle in the top-right corner; bitrate and fps apply live
 - **CLI flags** — override the config file for one run (e.g. `uscreen --bitrate 30000 start`)
+- **The tray icon** — mode switch, settings, quit
+
+### Where the screen sits
+
+`position` places the virtual screen `right` (default), `left`, `above` or
+`below` everything else. Above and left move the rest of the desktop to make
+room, in one atomic reconfiguration, because KDE will not accept a negative
+position — it reports success and quietly leaves the output disabled.
+
+### Codec
+
+H.264 is the default because every device decodes it. If your tablet has a
+hardware HEVC decoder — `uscreen doctor` will tell you — `hevc_nvenc` is worth
+switching to: sharper text at the same bitrate, and on a Tab S9 Ultra it
+measured slightly *faster* than H.264 (p50 15-18ms against 18-22ms), because
+the tablet has a dedicated low-latency HEVC decoder.
+
+With HEVC you can also turn on `ten_bit`, which encodes Main10. Be clear about
+what that is and is not: **the captured desktop is 8-bit and cannot be
+otherwise** — EVDI hands over ARGB8888 and there is no 10-bit path below us —
+so this adds no colour. What it buys is precision in the encoder's own
+arithmetic, which smooths the banding that shows on gradients at low bitrates.
+It is not HDR, and it is not a step towards it while the capture stays 8-bit.
+Measured cost on the tablet: none.
+
+### Over Wi-Fi
+
+The pipeline is not tied to USB — it speaks to whatever adb is connected to.
+So `adb tcpip 5555` followed by `adb connect <tablet-ip>:5555` is all it takes,
+and the daemon prefers the cable automatically whenever both are available.
+
+It is a fallback, and the numbers say why. Measured on a quiet 5GHz/6GHz link
+with excellent signal on both ends:
+
+| | USB | Wi-Fi |
+| --- | --- | --- |
+| median latency | 22.0ms | 22.8ms |
+| median p95 | 25.3ms | 78.6ms |
+| worst frame seen | 32ms | 2546ms |
+
+The median is fine. The tail is not, and no amount of signal strength fixes it
+— those figures are already from a link with none of the usual excuses. Use it
+when the cable is not an option, not instead of the cable.
+
+(The app holds a low-latency Wi-Fi lock while streaming. Without it the median
+was 32.0ms rather than 22.8ms: Android dozes the radio between frames, and a
+stream of small packets sixty times a second is the traffic pattern power save
+handles worst.)
 
 ### On-screen keyboard
 
@@ -381,39 +432,33 @@ sudo modprobe evdi
 - [x] Graphics tablet mode (pen drives the host's own screen)
 - [x] On-screen keyboard kept out of the way in both modes
 - [x] Switching between the two modes from the tablet, without a restart
+- [x] System tray icon: state, mode switch, settings, quit
+- [x] Wi-Fi as a fallback transport, with the cost measured and stated
+- [x] Virtual screen on any side of the desktop
+- [x] HEVC, and 10-bit encoding on top of it
 
-### What 1.0 means
+### Next
 
-Three things. The version number waits for them rather than arriving first.
-
-- [ ] **Wi-Fi as a fallback.** Nothing in the pipeline is tied to USB — it
-      speaks to whatever adb is connected to. So the work here is mostly
-      measuring what Wi-Fi actually costs and saying so plainly, not new
-      protocol. USB stays the default: the latency figures above are USB
-      figures, and they will not survive the move.
-- [ ] **System tray icon.** The daemon starts with the desktop, which means
-      it currently runs with nothing to show for itself. Connection state and
-      the mode switch belong there — the tablet can already switch modes, the
-      host should be able to as well.
-- [ ] **Multi-monitor.** Three separate things under one name: several
-      tablets as several virtual screens; choosing where the virtual screen
-      sits in the layout instead of always to the right of everything; and
-      staying correct on a host that already has more than one physical
-      monitor.
+- [ ] **Several tablets at once**, each as its own virtual screen. Everything
+      below the daemon is currently single-instance — one helper, one FIFO,
+      one EDID, one video port, one input port, one set of uinput devices — so
+      this is a real piece of work rather than a loop. It is not in 1.0
+      because it could not be honestly tested: verifying it needs a second
+      tablet, and shipping a feature nobody has run is worse than not shipping
+      it.
+- [ ] **AOA transport.** Would remove the USB debugging requirement, which is
+      the last thing between this and simply plugging a cable in.
 
 ### Being explored
 
-- [ ] **HEVC.** Sharper text at the same bitrate, and a prerequisite for
-      anything 10-bit. Worth having on its own.
-- [ ] **AOA transport.** Would remove the USB debugging requirement, which is
-      the last thing between this and simply plugging a cable in.
-- [ ] **HDR.** Blocked below us, and not by bandwidth — 10-bit costs perhaps
-      a quarter more bits, which a lower frame rate would more than pay for.
-      The problem is that EVDI hands over 8-bit ARGB, so there is nothing
-      10-bit to encode in the first place. It would take EVDI growing a
-      10-bit format, HEVC Main10 above it, and HDR metadata in the generated
-      EDID. Worth noting that `uscreen doctor` currently asks you to turn the
-      tablet's colour enhancements *off*, for accuracy.
+- [ ] **HDR.** Blocked below us, and not by bandwidth — 10-bit costs perhaps a
+      quarter more bits, which a lower frame rate would more than pay for. The
+      problem is that EVDI hands over 8-bit ARGB, so there is nothing 10-bit to
+      capture in the first place; `ten_bit` above encodes an 8-bit desktop in
+      10 bits, which is a different thing entirely. Real HDR would take EVDI
+      growing a 10-bit format, and HDR metadata in the generated EDID. Worth
+      noting that `uscreen doctor` currently asks you to turn the tablet's
+      colour enhancements *off*, for accuracy.
 
 ## Contributing
 

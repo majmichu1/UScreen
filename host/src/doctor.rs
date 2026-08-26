@@ -326,6 +326,37 @@ async fn check_tablet(r: &mut Report, cfg: &FileConfig) {
         None => r.line(Level::Warn, "adb reverse", "could not query"),
     }
 
+    // Whether this tablet can decode HEVC, and in 10 bits. Measured on one
+    // Tab S9 Ultra, HEVC was slightly faster than H.264 and Main10 cost
+    // nothing on top — but only where the hardware decoder exists, which is
+    // exactly what this asks. H.264 stays the default because it is the one
+    // every device has.
+    let mut codec_args: Vec<&str> = dev_args.iter().map(|s| s.as_str()).collect();
+    codec_args.extend_from_slice(&["shell", "dumpsys", "media.player"]);
+    if let Some(out) = output_of("adb", &codec_args).await {
+        let hevc = out.contains("video/hevc");
+        let main10 = out.contains("Main10");
+        match (hevc, main10, cfg.encoder.contains("hevc")) {
+            (_, _, true) => r.line(Level::Ok, "tablet codec", "HEVC, and the host is sending it"),
+            (true, true, false) => {
+                r.line(Level::Ok, "tablet codec", "HEVC Main10 supported in hardware");
+                r.hint(
+                    "optional: switch the encoder to hevc_nvenc for sharper text at the same \
+                     bitrate, and tick 10-bit to smooth gradients",
+                );
+            }
+            (true, false, false) => {
+                r.line(Level::Ok, "tablet codec", "HEVC supported (8-bit)");
+                r.hint("optional: switch the encoder to hevc_nvenc for sharper text");
+            }
+            (false, _, false) => r.line(
+                Level::Ok,
+                "tablet codec",
+                "H.264 only — leave the encoder as it is",
+            ),
+        }
+    }
+
     let mut pm_args: Vec<&str> = dev_args.iter().map(|s| s.as_str()).collect();
     pm_args.extend_from_slice(&["shell", "pm", "list", "packages", "com.uscreen"]);
     if let Some(out) = output_of("adb", &pm_args).await {
