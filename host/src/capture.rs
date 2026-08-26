@@ -1616,9 +1616,80 @@ mod tests {
         data
     }
 
+    /// HEVC NAL: two-byte header, type in bits 1..6 of the first byte.
+    fn hevc_nal(nal_type: u8, payload: &[u8]) -> Vec<u8> {
+        let mut data = vec![0, 0, 0, 1, nal_type << 1, 1];
+        data.extend_from_slice(payload);
+        data
+    }
+
+    /// A slice NAL whose first payload bit is `first_slice_segment_in_pic_flag`.
+    fn hevc_slice(nal_type: u8, first_in_pic: bool) -> Vec<u8> {
+        hevc_nal(nal_type, &[if first_in_pic { 0x80 } else { 0x00 }, 0x00])
+    }
+
+    #[test]
+    fn hevc_parameter_sets_and_keyframes_are_recognised() {
+        // A NAL is only parsed once the next start code proves it complete,
+        // so anything pushed last stays buffered until finish().
+        let mut incomplete = H264AnnexBPacketizer::new(Codec::Hevc);
+        incomplete.push(&hevc_nal(HEVC_NAL_VPS, &[1, 2]));
+        incomplete.push(&hevc_nal(HEVC_NAL_SPS, &[3, 4]));
+        incomplete.finish();
+        assert!(
+            incomplete.codec_config().is_none(),
+            "config is not complete without a PPS"
+        );
+
+        let mut p = H264AnnexBPacketizer::new(Codec::Hevc);
+        let mut data = Vec::new();
+        // VPS, SPS and PPS all belong to the decoder configuration.
+        data.extend_from_slice(&hevc_nal(HEVC_NAL_VPS, &[1, 2]));
+        data.extend_from_slice(&hevc_nal(HEVC_NAL_SPS, &[3, 4]));
+        data.extend_from_slice(&hevc_nal(HEVC_NAL_PPS, &[5, 6]));
+        data.extend_from_slice(&hevc_slice(19, true)); // IDR_W_RADL
+        let mut out = p.push(&data);
+        out.extend(p.finish());
+        assert!(p.codec_config().is_some(), "VPS+SPS+PPS should complete it");
+        assert_eq!(out.len(), 1);
+        assert!(out[0].is_idr, "IDR_W_RADL must be marked as a keyframe");
+    }
+
+    #[test]
+    fn hevc_cra_counts_as_a_join_point() {
+        // A decoder may start at any IRAP picture, not only an IDR. Treating
+        // CRA as an ordinary frame would leave a joining client waiting for a
+        // keyframe the encoder never sends.
+        let mut p = H264AnnexBPacketizer::new(Codec::Hevc);
+        p.push(&hevc_slice(21, true)); // CRA_NUT
+        let out = p.finish();
+        assert_eq!(out.len(), 1);
+        assert!(out[0].is_idr, "CRA is a valid random access point");
+    }
+
+    #[test]
+    fn hevc_splits_pictures_on_the_first_slice_flag() {
+        let mut p = H264AnnexBPacketizer::new(Codec::Hevc);
+        let mut data = Vec::new();
+        data.extend_from_slice(&hevc_slice(1, true)); // picture 1 starts
+        data.extend_from_slice(&hevc_slice(1, false)); // ...continues
+        data.extend_from_slice(&hevc_slice(1, true)); // picture 2 starts
+        let mut out = p.push(&data);
+        out.extend(p.finish());
+        assert_eq!(out.len(), 2, "two pictures, not three slices");
+    }
+
+    #[test]
+    fn codec_is_picked_from_the_encoder_name() {
+        assert_eq!(Codec::from_encoder("h264_nvenc"), Codec::H264);
+        assert_eq!(Codec::from_encoder("libx264"), Codec::H264);
+        assert_eq!(Codec::from_encoder("hevc_nvenc"), Codec::Hevc);
+        assert_eq!(Codec::from_encoder("hevc_vaapi"), Codec::Hevc);
+    }
+
     #[test]
     fn packetizer_handles_start_code_split_across_reads() {
-        let mut packetizer = H264AnnexBPacketizer::new();
+        let mut packetizer = H264AnnexBPacketizer::new(Codec::H264);
         assert!(packetizer.push(&[0, 0]).is_empty());
         assert!(packetizer.push(&[0, 1, NAL_TYPE_IDR, 0x80]).is_empty());
 
@@ -1630,7 +1701,7 @@ mod tests {
 
     #[test]
     fn packetizer_splits_multiple_access_units_in_one_buffer() {
-        let mut packetizer = H264AnnexBPacketizer::new();
+        let mut packetizer = H264AnnexBPacketizer::new(Codec::H264);
         let mut data = nal(NAL_TYPE_AUD, &[0x10]);
         data.extend_from_slice(&nal(NAL_TYPE_IDR, &[0x80]));
         data.extend_from_slice(&nal(NAL_TYPE_AUD, &[0x10]));
@@ -1680,7 +1751,7 @@ mod tests {
 
     #[test]
     fn packetizer_prepends_sps_pps_to_idr() {
-        let mut packetizer = H264AnnexBPacketizer::new();
+        let mut packetizer = H264AnnexBPacketizer::new(Codec::H264);
         let mut data = nal(NAL_TYPE_SPS, &[0x64, 0x00]);
         data.extend_from_slice(&nal(NAL_TYPE_PPS, &[0xac]));
         data.extend_from_slice(&nal(NAL_TYPE_IDR, &[0x80]));
@@ -1724,7 +1795,7 @@ mod tests {
 
     #[test]
     fn packetizer_does_not_emit_partial_nals() {
-        let mut packetizer = H264AnnexBPacketizer::new();
+        let mut packetizer = H264AnnexBPacketizer::new(Codec::H264);
         let first = nal(NAL_TYPE_IDR, &[0x80, 0x11, 0x22]);
 
         assert!(packetizer.push(&first[..4]).is_empty());
