@@ -16,13 +16,14 @@ const RECONNECT_DELAY_MS: u64 = 2000;
 pub const FIFO_PATH: &str = "/tmp/uscreen_capture.fifo";
 
 
-// H.264 NAL unit types. Only the CLI path parses the bitstream itself; with the
-// in-process encoder libavcodec hands back one complete access unit per frame.
-#[cfg(not(feature = "inproc-encoder"))]
-/// Which bitstream syntax the packetizer is reading. H.264 and HEVC agree on
-/// Annex B start codes and on nothing else that matters here: the NAL header
-/// is one byte against two, the type lives in different bits, and a keyframe
-/// is a different set of type numbers.
+/// Which bitstream syntax is in play. H.264 and HEVC agree on Annex B start
+/// codes and on nothing else that matters here: the NAL header is one byte
+/// against two, the type lives in different bits, and a keyframe is a
+/// different set of type numbers.
+///
+/// Not gated on the packetizer's feature flag: the daemon has to tell the
+/// tablet which codec to build a decoder for regardless of how it was
+/// compiled.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Codec {
     H264,
@@ -48,16 +49,27 @@ impl Codec {
     }
 }
 
-// HEVC NAL unit types (H.265 Table 7-1). IRAP covers every type that a
-// decoder may start from, not only IDR: a stream may open on a CRA.
+// NAL unit types. Only the CLI path parses the bitstream itself; with the
+// in-process encoder libavcodec hands back one complete access unit per frame.
+//
+// HEVC types are from H.265 Table 7-1. IRAP covers every type a decoder may
+// start from, not only IDR: a stream may open on a CRA.
+#[cfg(not(feature = "inproc-encoder"))]
 const HEVC_NAL_VCL_MAX: u8 = 31;
+#[cfg(not(feature = "inproc-encoder"))]
 const HEVC_NAL_IRAP_MIN: u8 = 16;
+#[cfg(not(feature = "inproc-encoder"))]
 const HEVC_NAL_IRAP_MAX: u8 = 23;
+#[cfg(not(feature = "inproc-encoder"))]
 const HEVC_NAL_VPS: u8 = 32;
+#[cfg(not(feature = "inproc-encoder"))]
 const HEVC_NAL_SPS: u8 = 33;
+#[cfg(not(feature = "inproc-encoder"))]
 const HEVC_NAL_PPS: u8 = 34;
+#[cfg(not(feature = "inproc-encoder"))]
 const HEVC_NAL_AUD: u8 = 35;
 
+#[cfg(not(feature = "inproc-encoder"))]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum NalKind {
     Sps,
@@ -67,6 +79,7 @@ enum NalKind {
     Other,
 }
 
+#[cfg(not(feature = "inproc-encoder"))]
 const NAL_TYPE_NON_IDR: u8 = 1;
 #[cfg(not(feature = "inproc-encoder"))]
 const NAL_TYPE_IDR: u8 = 5;
@@ -1020,6 +1033,17 @@ impl CaptureManager {
                         self.config.bitrate,
                         self.config.quality,
                     );
+                    // The in-process encoder feeds libavcodec NV12 straight
+                    // from the FIFO, with no conversion step to hang 10-bit
+                    // on. Say so rather than letting the setting quietly do
+                    // nothing: a setting that is ignored in silence is worse
+                    // than one that is refused out loud.
+                    if self.config.ten_bit {
+                        warn!(
+                            "10-bit is not supported by the in-process encoder — \
+                             encoding 8-bit. Build without --features inproc-encoder for 10-bit."
+                        );
+                    }
                     let (tx2, cc, idr, stopc, lat) = (
                         tx.clone(),
                         self.codec_config.clone(),

@@ -283,6 +283,11 @@ distrobox enter uscreen-tools -- cargo build --release --features inproc-encoder
 The `-free` headers are fine here: they declare the same API, and at runtime the
 binary uses whichever ffmpeg the host has installed.
 
+One limitation: the in-process encoder feeds libavcodec NV12 straight from the
+FIFO, with no conversion step to hang 10-bit on, so `ten_bit` does nothing
+there. The daemon says so on startup rather than ignoring it quietly. Use the
+default build for 10-bit.
+
 ## Performance Tuning
 
 ### NVIDIA GPUs (NVENC) — recommended

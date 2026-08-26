@@ -120,13 +120,6 @@ impl Position {
     pub fn parse_or_default(s: &str) -> Self {
         Self::parse(s).unwrap_or(Position::Right)
     }
-
-    pub const ALL: [(&'static str, &'static str); 4] = [
-        ("right", "Right of everything"),
-        ("left", "Left of everything"),
-        ("above", "Above everything"),
-        ("below", "Below everything"),
-    ];
 }
 
 pub fn config_path() -> PathBuf {
