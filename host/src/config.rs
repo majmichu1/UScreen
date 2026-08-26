@@ -57,6 +57,10 @@ pub struct FileConfig {
     /// For drawing that removes display latency from the loop entirely, which
     /// is worth more than any amount of tuning the video path.
     pub pen_only: bool,
+    /// Where the virtual screen sits relative to the physical ones:
+    /// "right" (default), "left", "above" or "below". Anything else is
+    /// treated as "right" rather than refusing to start over a typo.
+    pub position: String,
     /// Match the virtual display to whatever resolution the tablet reports
     pub auto_resolution: bool,
     pub video_port: u16,
@@ -76,12 +80,47 @@ impl Default for FileConfig {
             quality: DEFAULT_QUALITY,
             stream_scale: 1,
             pen_only: false,
+            position: "right".into(),
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,
             auto_launch_app: true,
         }
     }
+}
+
+/// Where the virtual screen goes relative to everything already on the desktop.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Position {
+    Right,
+    Left,
+    Above,
+    Below,
+}
+
+impl Position {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "right" => Some(Position::Right),
+            "left" => Some(Position::Left),
+            "above" | "top" => Some(Position::Above),
+            "below" | "bottom" => Some(Position::Below),
+            _ => None,
+        }
+    }
+
+    /// Unknown values are a typo in a config file, not a reason to refuse to
+    /// bring the screen up at all.
+    pub fn parse_or_default(s: &str) -> Self {
+        Self::parse(s).unwrap_or(Position::Right)
+    }
+
+    pub const ALL: [(&'static str, &'static str); 4] = [
+        ("right", "Right of everything"),
+        ("left", "Left of everything"),
+        ("above", "Above everything"),
+        ("below", "Below everything"),
+    ];
 }
 
 pub fn config_path() -> PathBuf {
@@ -128,6 +167,14 @@ impl FileConfig {
         self.stream_scale = self.stream_scale.clamp(1, 4);
         self.width = self.width.clamp(640, 8192);
         self.height = self.height.clamp(480, 8192);
+
+        if Position::parse(&self.position).is_none() {
+            tracing::warn!(
+                "Unknown position {:?} — falling back to \"right\"",
+                self.position
+            );
+            self.position = "right".into();
+        }
     }
 
     pub fn save(&self) -> Result<()> {
