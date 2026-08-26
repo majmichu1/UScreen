@@ -8,15 +8,19 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.net.wifi.WifiManager
 import android.os.PowerManager
+import android.util.Log
 
 class StreamingService : Service() {
     companion object {
         const val CHANNEL_ID = "uscreen_streaming"
         const val NOTIFICATION_ID = 1
+        private const val TAG = "UScreenService"
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -71,11 +75,48 @@ class StreamingService : Service() {
             }
         }
 
+        // Keep the Wi-Fi radio out of power save.
+        //
+        // Over USB this changes nothing, but over Wi-Fi it is the difference
+        // between a usable fallback and an unusable one. Left alone, Android
+        // dozes the radio between frames and the cost of waking it lands on
+        // whatever frame arrives next: measured p50 stayed near 33ms while
+        // individual frames reached three quarters of a second. A stream of
+        // small packets sixty times a second is exactly the traffic pattern
+        // power save handles worst.
+        //
+        // LOW_LATENCY over HIGH_PERF: it also asks the driver for a
+        // low-latency mode, and HIGH_PERF is deprecated from API 29. It only
+        // applies while the screen is on and this app is foreground, which is
+        // precisely when frames are arriving.
+        if (wifiLock?.isHeld != true) {
+            try {
+                val wm = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+                val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                }
+                wifiLock = wm.createWifiLock(mode, "UScreen::StreamingWifiLock").apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+                Log.i(TAG, "Wi-Fi lock held (low latency)")
+            } catch (e: Exception) {
+                // Not fatal: it only costs latency on a wireless link.
+                Log.w(TAG, "Could not take a Wi-Fi lock: ${e.message}")
+            }
+        }
+
         return START_STICKY
     }
 
     override fun onDestroy() {
         wakeLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wifiLock?.let {
             if (it.isHeld) it.release()
         }
         super.onDestroy()
