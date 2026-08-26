@@ -358,6 +358,8 @@ sudo modprobe evdi
 
 ## Roadmap
 
+### Shipped
+
 - [x] Core streaming pipeline (capture → encode → stream → decode)
 - [x] Android app with MediaCodec rendering
 - [x] Touch/S-Pen event capture and WebSocket transmission
@@ -374,11 +376,44 @@ sudo modprobe evdi
 - [x] `uscreen doctor` diagnostics
 - [x] End-to-end latency measurement
 - [x] Starts with the desktop — plug the cable in and it works
+- [x] Stream downscaling for lower decode latency (`stream_scale`)
+- [x] Optional in-process encoder (libavcodec instead of an ffmpeg process)
 - [x] Graphics tablet mode (pen drives the host's own screen)
-- [ ] System tray icon
-- [ ] Wi-Fi mode (fallback)
-- [ ] Multi-monitor support
-- [ ] HDR support
+- [x] On-screen keyboard kept out of the way in both modes
+- [x] Switching between the two modes from the tablet, without a restart
+
+### What 1.0 means
+
+Three things. The version number waits for them rather than arriving first.
+
+- [ ] **Wi-Fi as a fallback.** Nothing in the pipeline is tied to USB — it
+      speaks to whatever adb is connected to. So the work here is mostly
+      measuring what Wi-Fi actually costs and saying so plainly, not new
+      protocol. USB stays the default: the latency figures above are USB
+      figures, and they will not survive the move.
+- [ ] **System tray icon.** The daemon starts with the desktop, which means
+      it currently runs with nothing to show for itself. Connection state and
+      the mode switch belong there — the tablet can already switch modes, the
+      host should be able to as well.
+- [ ] **Multi-monitor.** Three separate things under one name: several
+      tablets as several virtual screens; choosing where the virtual screen
+      sits in the layout instead of always to the right of everything; and
+      staying correct on a host that already has more than one physical
+      monitor.
+
+### Being explored
+
+- [ ] **HEVC.** Sharper text at the same bitrate, and a prerequisite for
+      anything 10-bit. Worth having on its own.
+- [ ] **AOA transport.** Would remove the USB debugging requirement, which is
+      the last thing between this and simply plugging a cable in.
+- [ ] **HDR.** Blocked below us, and not by bandwidth — 10-bit costs perhaps
+      a quarter more bits, which a lower frame rate would more than pay for.
+      The problem is that EVDI hands over 8-bit ARGB, so there is nothing
+      10-bit to encode in the first place. It would take EVDI growing a
+      10-bit format, HEVC Main10 above it, and HDR metadata in the generated
+      EDID. Worth noting that `uscreen doctor` currently asks you to turn the
+      tablet's colour enhancements *off*, for accuracy.
 
 ## Contributing
 
