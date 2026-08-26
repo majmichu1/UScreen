@@ -28,3 +28,4 @@ tokio-tungstenite = "0.21"
 libc = "0.2"
 zbus = { version = "4", features = ["tokio"] }
 toml = "0.8"
+ksni = "0.3"

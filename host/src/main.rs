@@ -8,6 +8,7 @@ mod input;
 mod latency;
 mod osk;
 mod stream;
+mod tray;
 mod vdisplay;
 
 use anyhow::Result;
@@ -252,6 +253,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
 
     // Tablet presence, published by the ADB monitor.
     let (tablet_tx, mut tablet_rx) = watch::channel(false);
+    let tray_tablet_rx = tablet_tx.subscribe();
 
     // What the capture manager actually follows: the virtual display should
     // exist exactly while a tablet is attached *and* being used as a screen.
@@ -363,6 +365,15 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         }
     });
 
+    // The daemon's only face on the desktop. It follows the same channels the
+    // rest of the daemon does, so it cannot drift out of step with what is
+    // actually running.
+    let tray_mode_tx = mode_tx.clone();
+    let tray_shutdown_tx = shutdown_tx.clone();
+    let tray_handle = tokio::spawn(async move {
+        tray::run(tray_mode_tx, tray_tablet_rx, tray_shutdown_tx).await;
+    });
+
     // Plug-and-play: watch for the tablet over ADB, set up port forwarding
     // and launch the app whenever it's (re)connected.
     let auto_launch = file_cfg.auto_launch_app;
@@ -388,9 +399,14 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     // evdi_helper/ffmpeg children via kill_on_drop) ever runs, orphaning
     // them to fight over the shared FIFO with the next daemon that starts.
     let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())?;
+    // Quit from the tray raises the same flag the signal handlers do, so it
+    // has to be waited on here too — otherwise the pipeline winds down while
+    // the process itself stays alive with nothing left to run.
+    let mut quit_rx = shutdown_tx.subscribe();
     tokio::select! {
         _ = signal::ctrl_c() => {}
         _ = sigterm.recv() => {}
+        _ = async { while quit_rx.changed().await.is_ok() && !*quit_rx.borrow() {} } => {}
     }
     info!("Shutting down...");
 
@@ -411,6 +427,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     adb_handle.abort();
     save_handle.abort();
     mode_save_handle.abort();
+    tray_handle.abort();
 
     // Clean up PID file
     let _ = std::fs::remove_file(&pid_path);
