@@ -197,7 +197,9 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         position: config::Position::parse_or_default(&file_cfg.position),
         ten_bit: file_cfg.ten_bit,
         instance: 0,
-        card: None,
+        // With several tablets every helper is pinned to its own card; the
+        // helper's own search would give each of them the same one.
+        card: if file_cfg.max_tablets > 1 { vdisplay::evdi_cards().into_iter().min() } else { None },
     };
 
     // One secret per daemon run. Handed to the app over adb when it is
@@ -419,8 +421,34 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     // and launch the app whenever it's (re)connected.
     let auto_launch = file_cfg.auto_launch_app;
     let adb_token = token.clone();
+    let extra = ExtraSessionTemplate {
+        max_tablets: file_cfg.max_tablets,
+        cap_template: capture::CaptureConfig {
+            helper_path: find_helper(&cli.helper),
+            edid_path: None,
+            encoder: encoder.clone(),
+            fps,
+            bitrate,
+            width,
+            height,
+            quality,
+            width_mm: edid::DEFAULT_WIDTH_MM,
+            height_mm: edid::DEFAULT_HEIGHT_MM,
+            stream_scale,
+            position: config::Position::parse_or_default(&file_cfg.position),
+            ten_bit: file_cfg.ten_bit,
+            instance: 0,
+            card: None,
+        },
+        video_port,
+        input_port,
+        codec: capture::Codec::from_encoder(&encoder).muxer().to_string(),
+        token: token.clone(),
+        mode_tx: mode_tx.clone(),
+        shutdown_rx: shutdown_tx.subscribe(),
+    };
     let adb_handle = tokio::spawn(async move {
-        adb_monitor(video_port, input_port, auto_launch, tablet_tx, adb_token, relaunch).await;
+        adb_monitor(video_port, input_port, auto_launch, tablet_tx, adb_token, relaunch, extra).await;
     });
 
     println!();
@@ -570,6 +598,166 @@ fn find_helper(path: &std::path::Path) -> PathBuf {
 ///
 /// Presence is published on `tablet_tx` so the capture manager can bring the
 /// virtual display up and down along with the tablet.
+/// Everything needed to bring up a pipeline for a second (third, ...)
+/// tablet on demand. The first tablet is wired at startup like it always
+/// was; these are spawned when another serial shows up and torn down when
+/// it goes.
+struct ExtraSessionTemplate {
+    max_tablets: u32,
+    cap_template: capture::CaptureConfig,
+    video_port: u16,
+    input_port: u16,
+    codec: String,
+    token: Option<String>,
+    mode_tx: watch::Sender<bool>,
+    shutdown_rx: watch::Receiver<bool>,
+}
+
+/// One extra tablet's running pipeline.
+struct ExtraSession {
+    instance: u32,
+    tablet_tx: watch::Sender<bool>,
+    relaunch: std::sync::Arc<tokio::sync::Notify>,
+    stop_tx: watch::Sender<bool>,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
+    video_port: u16,
+    input_port: u16,
+}
+
+impl ExtraSession {
+    async fn stop(self) {
+        let _ = self.tablet_tx.send(false);
+        let _ = self.stop_tx.send(true);
+        // Let the capture manager disable its output and reap its children
+        // before the tasks are dropped.
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        for t in self.tasks {
+            t.abort();
+        }
+    }
+}
+
+/// Bring up capture, stream and input for tablet number `instance`.
+/// Ports are the base ports plus 2 per instance; the tablet side keeps
+/// using 8890/8891, since `adb reverse` maps them per device.
+fn spawn_extra_session(t: &ExtraSessionTemplate, instance: u32) -> ExtraSession {
+    let cards = vdisplay::evdi_cards();
+    let mut cfg = t.cap_template.clone();
+    cfg.instance = instance;
+    cfg.card = cards.get(instance as usize).copied();
+    if cfg.card.is_none() {
+        warn!(
+            "Tablet {} needs an EVDI device of its own but only {} exist — set \
+             initial_device_count={} in /etc/modprobe.d/uscreen-evdi.conf and reload evdi",
+            instance + 1,
+            cards.len(),
+            t.max_tablets
+        );
+    }
+    let video_port = t.video_port + 2 * instance as u16;
+    let input_port = t.input_port + 2 * instance as u16;
+
+    let (settings_tx, settings_rx) = watch::channel(capture::EncoderSettings {
+        encoder: cfg.encoder.clone(),
+        fps: cfg.fps,
+        bitrate: cfg.bitrate,
+        width: cfg.width,
+        height: cfg.height,
+        quality: cfg.quality,
+        width_mm: cfg.width_mm,
+        height_mm: cfg.height_mm,
+        stream_scale: cfg.stream_scale,
+    });
+    let mut cap = capture::CaptureManager::new(cfg.clone());
+    let card_rx = cap.card_rx();
+    let codec_config = cap.codec_config_arc();
+    let latency = cap.latency_tracker();
+    let relaunch = std::sync::Arc::new(tokio::sync::Notify::new());
+    let stream_srv = stream::StreamServer::new(
+        stream::StreamConfig { video_port, token: t.token.clone() },
+        codec_config,
+        cap.idr_request_flag(),
+    );
+    let input_srv = input::InputServer::new(
+        input::InputConfig {
+            port: input_port,
+            instance,
+            token: t.token.clone(),
+            codec: t.codec.clone(),
+            virtual_width: cfg.width,
+            virtual_height: cfg.height,
+        },
+        Some(settings_tx),
+        t.mode_tx.clone(),
+        latency,
+        relaunch.clone(),
+        card_rx,
+    );
+
+    let (tablet_tx, mut tablet_rx) = watch::channel(false);
+    let (gate_tx, gate_rx) = watch::channel(false);
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let mut mode_rx = t.mode_tx.subscribe();
+    let mut tasks = Vec::new();
+    tasks.push(tokio::spawn(async move {
+        let mut last = false;
+        loop {
+            let active = *tablet_rx.borrow() && !*mode_rx.borrow();
+            if active != last {
+                last = active;
+                let _ = gate_tx.send(active);
+            }
+            tokio::select! {
+                r = tablet_rx.changed() => if r.is_err() { break },
+                r = mode_rx.changed() => if r.is_err() { break },
+            }
+        }
+    }));
+    let (video_tx, _) = broadcast::channel(8);
+    let video_rx = video_tx.subscribe();
+    // Either the whole daemon stopping or this session being torn down
+    // must wind the capture pipeline down cleanly.
+    let mut daemon_stop = t.shutdown_rx.clone();
+    let (cap_stop_tx, cap_stop_rx) = watch::channel(false);
+    let mut stop_rx_c = stop_rx.clone();
+    tasks.push(tokio::spawn(async move {
+        tokio::select! {
+            _ = daemon_stop.changed() => {}
+            _ = stop_rx_c.changed() => {}
+        }
+        let _ = cap_stop_tx.send(true);
+    }));
+    tasks.push(tokio::spawn(async move {
+        if let Err(e) = cap.stream_frames(video_tx, settings_rx, gate_rx, cap_stop_rx).await {
+            error!("Capture manager {} failed: {}", instance, e);
+        }
+    }));
+    tasks.push(tokio::spawn(async move {
+        if let Err(e) = stream_srv.run(video_rx).await {
+            error!("Stream server {} failed: {}", instance, e);
+        }
+    }));
+    tasks.push(tokio::spawn(async move {
+        if let Err(e) = input_srv.run().await {
+            error!("Input server {} failed: {}", instance, e);
+        }
+    }));
+    info!(
+        "Tablet slot {} ready: video port {}, input port {}{}",
+        instance + 1,
+        video_port,
+        input_port,
+        cfg.card.map(|c| format!(", EVDI card{}", c)).unwrap_or_default()
+    );
+    ExtraSession { instance, tablet_tx, relaunch, stop_tx, tasks, video_port, input_port }
+}
+
+/// Keeps watching for tablets. The first serial seen gets the pipeline wired
+/// at startup; with max_tablets > 1, further serials each get a pipeline of
+/// their own for as long as they stay attached.
+///
+/// Presence is published on `tablet_tx` so the capture manager can bring the
+/// virtual display up and down along with the tablet.
 async fn adb_monitor(
     video_port: u16,
     input_port: u16,
@@ -577,6 +765,7 @@ async fn adb_monitor(
     tablet_tx: watch::Sender<bool>,
     token: Option<String>,
     relaunch: std::sync::Arc<tokio::sync::Notify>,
+    extra: ExtraSessionTemplate,
 ) {
     let mut current: Option<String> = None;
     let mut last_relaunch = std::time::Instant::now() - std::time::Duration::from_secs(60);
@@ -586,16 +775,23 @@ async fn adb_monitor(
     // plugged in. Reset whenever a tablet (re)connects.
     let mut relaunches: u32 = 0;
     const MAX_RELAUNCHES: u32 = 3;
+    // Further tablets, by serial.
+    let mut extras: std::collections::HashMap<String, ExtraSession> = std::collections::HashMap::new();
 
-    // Without adb nothing below can ever succeed, and a loop that polls a
-    // missing binary every two seconds in silence looks exactly like a
-    // daemon that is working and simply has no tablet. Say so once.
     if tokio::process::Command::new("adb").arg("version").output().await.is_err() {
         error!("adb is not installed — the tablet can never be found. Install android-tools (or adb) and restart.");
     }
 
     loop {
-        let found = adb_device_serial().await;
+        let mut devices = adb_devices().await;
+        // Test hook: pretend a serial is attached so a second pipeline can be
+        // exercised with one physical tablet and a loopback client.
+        if let Ok(fake) = std::env::var("USCREEN_FAKE_TABLET") {
+            if !fake.is_empty() && !devices.iter().any(|d| d == &fake) {
+                devices.push(fake);
+            }
+        }
+        let found = devices.first().cloned();
 
         match (&current, &found) {
             // Newly attached, or a different tablet than before.
@@ -608,7 +804,7 @@ async fn adb_monitor(
                 announce_transport(serial);
                 on_tablet_connected(serial, video_port, input_port, auto_launch, token.as_deref()).await;
                 let _ = tablet_tx.send(true);
-                current = found;
+                current = found.clone();
                 relaunches = 0;
             }
             (Some(old), Some(serial)) if old != serial => {
@@ -628,7 +824,7 @@ async fn adb_monitor(
                 announce_transport(serial);
                 on_tablet_connected(serial, video_port, input_port, auto_launch, token.as_deref()).await;
                 let _ = tablet_tx.send(true);
-                current = found;
+                current = found.clone();
                 relaunches = 0;
             }
             (Some(old), None) => {
@@ -639,10 +835,50 @@ async fn adb_monitor(
             _ => {}
         }
 
+        // Further tablets. Anything beyond the first that has a free slot.
+        if extra.max_tablets > 1 {
+            let others: Vec<String> = devices.iter().skip(1).cloned().collect();
+            // Gone
+            let gone: Vec<String> = extras.keys().filter(|k| !others.contains(k)).cloned().collect();
+            for serial in gone {
+                if let Some(sess) = extras.remove(&serial) {
+                    info!("Tablet {} disconnected ({})", sess.instance + 1, serial);
+                    sess.stop().await;
+                }
+            }
+            // New
+            for serial in others {
+                if extras.contains_key(&serial) {
+                    continue;
+                }
+                let used: Vec<u32> = extras.values().map(|s| s.instance).collect();
+                let Some(instance) = (1..extra.max_tablets).find(|i| !used.contains(i)) else {
+                    warn!("Tablet {} attached but all {} slots are taken", serial, extra.max_tablets);
+                    continue;
+                };
+                info!("Tablet {} connected over {} ({})", instance + 1, transport_of(&serial).label(), serial);
+                let sess = spawn_extra_session(&extra, instance);
+                let is_fake = std::env::var("USCREEN_FAKE_TABLET").map(|f| f == serial).unwrap_or(false);
+                if !is_fake {
+                    on_tablet_connected(&serial, sess.video_port, sess.input_port, auto_launch, token.as_deref()).await;
+                }
+                let _ = sess.tablet_tx.send(true);
+                extras.insert(serial, sess);
+            }
+        }
+
         // Poll every two seconds, but wake at once if a client turned up
         // without the token: the app was started by hand, and launching it
         // again over adb is how it gets one. Rate-limited so a misbehaving
         // client cannot make us hammer adb.
+        let extra_relaunch = async {
+            let notifies: Vec<_> = extras.values().map(|s| s.relaunch.clone()).collect();
+            if notifies.is_empty() {
+                std::future::pending::<()>().await;
+            }
+            let futs = notifies.iter().map(|n| Box::pin(n.notified()));
+            futures_util::future::select_all(futs).await;
+        };
         tokio::select! {
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {}
             _ = relaunch.notified() => {
@@ -662,6 +898,13 @@ async fn adb_monitor(
                         info!("Delivering the session token to the app ({}/{})", relaunches, MAX_RELAUNCHES);
                         launch_app(serial, token.as_deref()).await;
                     }
+                }
+            }
+            _ = extra_relaunch => {
+                // Deliver the token to every extra tablet; cheap and rare.
+                for (serial, _) in extras.iter() {
+                    if std::env::var("USCREEN_FAKE_TABLET").map(|f| &f == serial).unwrap_or(false) { continue; }
+                    launch_app(serial, token.as_deref()).await;
                 }
             }
         }
@@ -777,6 +1020,27 @@ fn transport_of(serial: &str) -> Transport {
 /// Both can be present at once — `adb tcpip` leaves the cable working — and
 /// the order adb happens to list them in is not something to hang a latency
 /// difference on. USB wins whenever it is there.
+/// Every device in state "device", USB entries first.
+async fn adb_devices() -> Vec<String> {
+    let Ok(out) = tokio::process::Command::new("adb").arg("devices").output().await else {
+        return Vec::new();
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut ready: Vec<String> = text
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let serial = parts.next()?;
+            let state = parts.next()?;
+            (state == "device").then(|| serial.to_string())
+        })
+        .collect();
+    ready.sort_by_key(|s| transport_of(s) != Transport::Usb);
+    ready
+}
+
+#[allow(dead_code)]
 async fn adb_device_serial() -> Option<String> {
     let out = tokio::process::Command::new("adb")
         .arg("devices")

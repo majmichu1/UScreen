@@ -78,6 +78,10 @@ pub struct FileConfig {
     /// installed by the daemon; updating stays with you or your package
     /// manager. One HTTPS request a day to api.github.com.
     pub check_updates: bool,
+    /// How many tablets may be attached at once, each as its own virtual
+    /// screen. Needs that many EVDI devices: the installer sets
+    /// initial_device_count to match. 1 keeps everything exactly as before.
+    pub max_tablets: u32,
     /// Match the virtual display to whatever resolution the tablet reports
     pub auto_resolution: bool,
     pub video_port: u16,
@@ -101,6 +105,7 @@ impl Default for FileConfig {
             ten_bit: false,
             require_token: true,
             check_updates: true,
+            max_tablets: 1,
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,
@@ -178,6 +183,7 @@ impl FileConfig {
 
         self.quality = self.quality.clamp(MIN_QUALITY, MAX_QUALITY);
         self.stream_scale = self.stream_scale.clamp(1, 4);
+        self.max_tablets = self.max_tablets.clamp(1, 4);
         self.width = self.width.clamp(640, 8192);
         self.height = self.height.clamp(480, 8192);
 

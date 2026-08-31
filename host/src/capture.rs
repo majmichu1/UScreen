@@ -171,6 +171,7 @@ fn evdi_setup_problem_in(dir: &std::path::Path) -> Option<String> {
     )
 }
 
+#[derive(Clone)]
 pub struct CaptureConfig {
     pub helper_path: PathBuf,
     /// Explicit EDID override; None = generate one for the configured mode
