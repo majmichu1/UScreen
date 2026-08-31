@@ -14,6 +14,9 @@ CONTAINER="${USCREEN_BUILD_CONTAINER:-uscreen-build}"
 VERSION="$(sed -n 's/^VERSION = //p' Makefile)"
 EVDI_TAG="v1.15.0"
 
+# distrobox enter reports success whatever the inner command returned, so a
+# sentinel file is the only reliable way to know the build actually finished.
+rm -f target-deb12/.build-ok
 distrobox enter "$CONTAINER" -- bash -lc "
   set -e
   export PATH=\"\$HOME/.cargo/bin:\$PATH\"
@@ -30,7 +33,9 @@ distrobox enter "$CONTAINER" -- bash -lc "
   make -s -C target-deb12/evdi-src/library >/dev/null
   gcc -O3 -Ihost/evdi -o target-deb12/evdi_helper host/evdi/evdi_helper.c \\
       -Ltarget-deb12/evdi-src/library -levdi -lpthread -Wl,-rpath,'\$ORIGIN'
+  touch target-deb12/.build-ok
 "
+[ -f target-deb12/.build-ok ] || { echo "!! build inside $CONTAINER failed"; exit 1; }
 
 for b in target-deb12/release/uscreen target-deb12/release/uscreen-gui target-deb12/evdi_helper; do
   need="$(objdump -T "$b" | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1)"
