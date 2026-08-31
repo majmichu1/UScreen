@@ -124,7 +124,14 @@ pub struct EncoderSettings {
 /// fix it. Returns None when the state looks fine and the failure was
 /// something else.
 fn evdi_setup_problem() -> Option<String> {
-    let module_loaded = std::path::Path::new("/sys/devices/evdi").exists();
+    evdi_setup_problem_in(std::path::Path::new("/sys/devices/evdi"))
+}
+
+/// Split out so it can be tested against a temporary directory. Unloading the
+/// real module needs root and takes Xwayland down with it, so the three states
+/// this has to tell apart are otherwise unreachable from a test.
+fn evdi_setup_problem_in(dir: &std::path::Path) -> Option<String> {
+    let module_loaded = dir.exists();
     if !module_loaded {
         return Some(
             "The evdi kernel module is not loaded. Install it (evdi-dkms; on Arch it is in \
@@ -133,7 +140,7 @@ fn evdi_setup_problem() -> Option<String> {
         );
     }
 
-    let count: u32 = std::fs::read_to_string("/sys/devices/evdi/count")
+    let count: u32 = std::fs::read_to_string(dir.join("count"))
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0);
@@ -1749,6 +1756,39 @@ mod tests {
         let mut out = p.push(&data);
         out.extend(p.finish());
         assert_eq!(out.len(), 2, "two pictures, not three slices");
+    }
+
+    #[test]
+    fn evdi_problem_reports_a_missing_module() {
+        let dir = std::env::temp_dir().join("uscreen-test-evdi-absent");
+        let _ = std::fs::remove_dir_all(&dir);
+        let msg = evdi_setup_problem_in(&dir).expect("absent module is a problem");
+        assert!(msg.contains("not loaded"), "got: {msg}");
+    }
+
+    #[test]
+    fn evdi_problem_reports_a_module_with_no_devices() {
+        // The state the Arch report landed in: module resident, count 0, and
+        // /sys/devices/evdi/add writable only by root.
+        let dir = std::env::temp_dir().join("uscreen-test-evdi-empty");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("count"), "0\n").unwrap();
+        let msg = evdi_setup_problem_in(&dir).expect("no devices is a problem");
+        assert!(msg.contains("initial_device_count"), "got: {msg}");
+        assert!(msg.contains("modprobe -r evdi"), "must give the reload, got: {msg}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn evdi_problem_stays_quiet_when_a_device_exists() {
+        let dir = std::env::temp_dir().join("uscreen-test-evdi-ok");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("count"), "1\n").unwrap();
+        assert!(
+            evdi_setup_problem_in(&dir).is_none(),
+            "a working setup must not be blamed for an unrelated failure"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
