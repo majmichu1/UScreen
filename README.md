@@ -62,6 +62,7 @@ memory:
 | **Arch** | `ffmpeg` | `android-tools` | **AUR only**: `yay -S evdi-dkms` |
 | **Debian / Ubuntu** | `ffmpeg` | `adb` | `evdi-dkms` + `libevdi1` |
 | **Fedora** | needs RPM Fusion, and `--allowerasing` to replace `ffmpeg-free` | `android-tools` | **not packaged** — build from [DisplayLink/evdi](https://github.com/DisplayLink/evdi) |
+| **openSUSE** | `ffmpeg` | `android-tools` | `evdi` + `libevdi1` |
 | **Bazzite / Nobara** | in the image | `android-tools` | in the image |
 
 Note for Debian: the runtime library is `libevdi1`. There is no `libevdi0`
