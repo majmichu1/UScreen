@@ -25,6 +25,8 @@ struct FileConfig {
     /// silently erases.
     position: String,
     ten_bit: bool,
+    require_token: bool,
+    check_updates: bool,
     auto_resolution: bool,
     video_port: u16,
     input_port: u16,
@@ -44,6 +46,8 @@ impl Default for FileConfig {
             pen_only: false,
             position: "right".into(),
             ten_bit: false,
+            require_token: true,
+            check_updates: true,
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,
@@ -263,12 +267,44 @@ struct App {
     saved_cfg: FileConfig,
     status: Arc<Mutex<Status>>,
     message: String,
+    /// Newer release, if the check made when the window opened found one.
+    update: Arc<Mutex<Option<String>>>,
+}
+
+const RELEASES_API: &str = "https://api.github.com/repos/majmichu1/UScreen/releases/latest";
+const RELEASES_PAGE: &str = "https://github.com/majmichu1/UScreen/releases/latest";
+
+fn version_parts(v: &str) -> (u32, u32, u32) {
+    let mut it = v.trim().trim_start_matches('v').split('.').map(|p| p.parse().unwrap_or(0));
+    (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
+}
+
+/// One request when the window opens. Reports; never installs.
+fn check_for_update() -> Option<String> {
+    let out = Command::new("curl")
+        .args(["-sS", "--max-time", "4", "-H", "Accept: application/vnd.github+json",
+               "-H", concat!("User-Agent: uscreen-gui/", env!("CARGO_PKG_VERSION")), RELEASES_API])
+        .output().ok()?;
+    if !out.status.success() { return None; }
+    let body = String::from_utf8_lossy(&out.stdout);
+    let tag = body.split("\"tag_name\"").nth(1)?.split('"').nth(1)?.trim_start_matches('v').to_string();
+    (version_parts(&tag) > version_parts(env!("CARGO_PKG_VERSION"))).then_some(tag)
 }
 
 impl App {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let cfg = FileConfig::load();
         let status = Arc::new(Mutex::new(Status::default()));
+
+        let update = Arc::new(Mutex::new(None));
+        if cfg.check_updates {
+            let slot = update.clone();
+            std::thread::spawn(move || {
+                if let Some(v) = check_for_update() {
+                    if let Ok(mut g) = slot.lock() { *g = Some(v); }
+                }
+            });
+        }
 
         // Background poller: daemon + adb state every 2 seconds
         let status_bg = status.clone();
@@ -285,6 +321,7 @@ impl App {
             cfg,
             status,
             message: String::new(),
+            update,
         }
     }
 
@@ -339,6 +376,15 @@ impl eframe::App for App {
             ui.add_space(6.0);
             ui.heading(egui::RichText::new("UScreen").size(26.0));
             ui.label(egui::RichText::new("USB second display for your tablet").weak());
+            if let Some(v) = self.update.lock().ok().and_then(|g| g.clone()) {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("Update available: {}", v)).strong());
+                    if ui.link("open release page").clicked() {
+                        let _ = Command::new("xdg-open").arg(RELEASES_PAGE).spawn();
+                    }
+                });
+            }
             ui.add_space(12.0);
 
             // ----- First-run system setup -----
@@ -548,6 +594,19 @@ impl eframe::App for App {
                                 ui.selectable_value(&mut self.cfg.fps, f, format!("{} fps", f));
                             }
                         });
+                    ui.end_row();
+
+                    ui.label("Security");
+                    ui.vertical(|ui| {
+                        ui.checkbox(&mut self.cfg.require_token, "Require the session token");
+                        ui.label(egui::RichText::new(
+                            "Off only for an app older than 1.1.0. Without it any local process \
+                             can read the screen and inject input.").small().weak());
+                    });
+                    ui.end_row();
+
+                    ui.label("Updates");
+                    ui.checkbox(&mut self.cfg.check_updates, "Check for a newer release on start");
                     ui.end_row();
 
                     ui.label("Position");

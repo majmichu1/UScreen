@@ -29,7 +29,7 @@ install -Dm755 bin/evdi_helper      %{buildroot}%{_libdir}/uscreen/evdi_helper
 install -Dm755 bin/libevdi.so.1.15.0 %{buildroot}%{_libdir}/uscreen/libevdi.so.1.15.0
 ln -sf libevdi.so.1.15.0            %{buildroot}%{_libdir}/uscreen/libevdi.so.1
 install -Dm644 scripts/uscreen.desktop %{buildroot}%{_datadir}/applications/uscreen.desktop
-install -Dm644 scripts/uscreen.service %{buildroot}%{_userunitdir}/uscreen.service
+install -Dm644 packaging/uscreen.service %{buildroot}%{_userunitdir}/uscreen.service
 install -Dm644 packaging/uscreen-evdi.conf    %{buildroot}%{_modprobedir}/uscreen-evdi.conf
 install -Dm644 packaging/uscreen-modules.conf %{buildroot}%{_modulesloaddir}/uscreen.conf
 

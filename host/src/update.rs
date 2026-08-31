@@ -56,7 +56,7 @@ pub async fn latest_release_tag() -> Option<String> {
         .args([
             "-sS",
             "--max-time",
-            "10",
+            "4",
             "-H",
             "Accept: application/vnd.github+json",
             "-H",

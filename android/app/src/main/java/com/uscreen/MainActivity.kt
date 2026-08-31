@@ -36,6 +36,8 @@ import kotlin.math.roundToInt
 class MainActivity : ComponentActivity() {
     /// Mirrors the host's mode so the UI can say what is going on.
     private var penOnlyMode by mutableStateOf(false)
+    private var updateAvailable by mutableStateOf<String?>(null)
+    private var updateChecked = false
     private var videoReceiver: VideoReceiver? = null
     private var touchCapture: TouchCapture? = null
     private lateinit var prefs: Prefs
@@ -112,6 +114,7 @@ class MainActivity : ComponentActivity() {
             UScreenTheme {
                 UScreenMain(
                     penOnly = penOnlyMode,
+                    updateAvailable = updateAvailable,
                     videoReceiver = videoReceiver,
                     touchCapture = touchCapture,
                     prefs = prefs,
@@ -238,7 +241,10 @@ class MainActivity : ComponentActivity() {
         val changed = touchCapture?.token != token
         touchCapture?.token = token
         videoReceiver?.token = token
-        if (restart && changed) {
+        // Only rebuild live connections. If we are in the background, onStart
+        // will connect with the new token anyway; reconnecting here as well
+        // would leave a second socket behind.
+        if (restart && changed && touchCapture?.isControlConnected() == true) {
             Log.i("UScreen", "New session token — reconnecting")
             touchCapture?.disconnect()
             touchCapture?.connect()
@@ -270,6 +276,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        // One check per process, when the app comes to the front. It is a
+        // single small request and the answer changes about once a month.
+        if (!updateChecked) {
+            updateChecked = true
+            val cur = try { packageManager.getPackageInfo(packageName, 0).versionName ?: "0" } catch (_: Exception) { "0" }
+            Thread {
+                val found = UpdateCheck.newerThan(cur)
+                if (found != null) runOnUiThread { updateAvailable = found }
+            }.start()
+        }
         // The video receiver is started only once the host says it is actually
         // sending a display. In pen-only mode there is nothing to receive and
         // spinning up a decoder would waste power for no picture.
@@ -319,6 +335,7 @@ fun UScreenTheme(content: @Composable () -> Unit) {
 fun UScreenMain(
     onSurfaceReady: (SurfaceView) -> Unit,
     penOnly: Boolean = false,
+    updateAvailable: String? = null,
     onSurfaceDestroyed: () -> Unit = {},
     videoReceiver: VideoReceiver? = null,
     touchCapture: TouchCapture? = null,
@@ -329,21 +346,6 @@ fun UScreenMain(
     var mbps by remember { mutableStateOf(0f) }
     var showOverlay by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
-    var updateAvailable by remember { mutableStateOf<String?>(null) }
-    val ctx = LocalContext.current
-    // Checked when the sheet opens, not on every launch: one request, and
-    // only when the user is already looking at settings.
-    LaunchedEffect(showSettings) {
-        if (showSettings && updateAvailable == null) {
-            val cur = try {
-                ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "0"
-            } catch (_: Exception) { "0" }
-            val found = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                UpdateCheck.newerThan(cur)
-            }
-            if (found != null) updateAvailable = found
-        }
-    }
     var showStats by remember { mutableStateOf(prefs?.showStats ?: false) }
 
     val context = LocalContext.current
@@ -459,6 +461,29 @@ fun UScreenMain(
             contentAlignment = Alignment.Center
         ) {
             Text("⚙", fontSize = 18.sp, color = Color.White)
+        }
+
+        // "Update available" pill under the settings handle. Small, and gone
+        // the moment there is nothing to say.
+        if (updateAvailable != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 56.dp, end = 10.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xCC20202C))
+                    .clickable {
+                        context.startActivity(
+                            android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse(UpdateCheck.RELEASES_PAGE)
+                            )
+                        )
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text("Update $updateAvailable available", fontSize = 12.sp, color = Color.White)
+            }
         }
 
         if (showSettings) {

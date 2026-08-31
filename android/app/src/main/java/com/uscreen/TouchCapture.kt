@@ -161,6 +161,12 @@ class TouchCapture {
     }
 
     fun connect() {
+        // Idempotent: a second connect() must not leave the first socket
+        // alive with its listener still flipping isConnected. onStart and a
+        // token delivered through onNewIntent can both call this.
+        if (isConnected) return
+        webSocket?.cancel()
+        webSocket = null
         connectWebSocket()
     }
 
