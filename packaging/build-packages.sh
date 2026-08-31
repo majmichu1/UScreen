@@ -40,4 +40,8 @@ distrobox enter "${USCREEN_BUILD_CONTAINER:-uscreen-build}" -- bash -lc '
            -bb $RB/SPECS/uscreen.spec 2>&1 | grep -E "Wrote|error" 
   cp $RB/RPMS/x86_64/uscreen-$V-*.rpm dist/
 '
-ls -la dist/*.deb dist/*.rpm
+# Arch users get the PKGBUILD as a release file too; makepkg needs the
+# install script next to it, hence a small archive rather than a bare file.
+tar -C packaging/arch -czf "dist/uscreen-$VERSION-PKGBUILD.tar.gz" PKGBUILD uscreen.install
+
+ls -la dist/*.deb dist/*.rpm dist/*PKGBUILD*
