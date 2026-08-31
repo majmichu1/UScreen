@@ -1,0 +1,13 @@
+post_install() {
+  # initial_device_count is only read when evdi loads. If it is already
+  # loaded, reload it so a device exists without a reboot.
+  if lsmod | grep -q '^evdi'; then
+    modprobe -r evdi 2>/dev/null && modprobe evdi 2>/dev/null || \
+      echo "==> evdi is in use; reboot for the virtual display device to appear."
+  else
+    modprobe evdi 2>/dev/null || true
+  fi
+  modprobe uinput 2>/dev/null || true
+  echo "==> Enable at login with:  systemctl --user enable --now uscreen"
+}
+post_upgrade() { post_install; }

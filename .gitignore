@@ -48,3 +48,6 @@ AGENTS.md
 .env
 .env.*
 *.local
+
+# portable build tree (scripts/build-release.sh)
+target-deb12/

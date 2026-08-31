@@ -1,6 +1,6 @@
 .PHONY: all build build-helper install clean run android adb edid status stop list dist setup-system
 
-VERSION = 1.0.2
+VERSION = 1.1.0
 
 CARGO = cargo
 CC = gcc
@@ -82,16 +82,27 @@ stop:
 
 # Release tarball: prebuilt binaries + installer. Upload to GitHub releases
 # together with the release APK (android/app/build/outputs/apk/release/).
-dist: build
+dist:
+	@# Portable binaries (built against Debian 12 glibc) when the build
+	@# container exists; otherwise a local build, which only runs on
+	@# distributions at least as new as this machine.
+	@if distrobox list 2>/dev/null | grep -q ' uscreen-build '; then \
+		./scripts/build-release.sh && ./packaging/build-packages.sh; \
+	else \
+		echo "!! no uscreen-build container: building locally (NOT portable — see scripts/build-release.sh)"; \
+		$(MAKE) dist-local; \
+	fi
+
+dist-local: build
 	rm -rf dist/uscreen-$(VERSION)
-	mkdir -p dist/uscreen-$(VERSION)/bin dist/uscreen-$(VERSION)/scripts
+	mkdir -p dist/uscreen-$(VERSION)/bin dist/uscreen-$(VERSION)/scripts dist/uscreen-$(VERSION)/packaging
 	cp target/release/uscreen target/release/uscreen-gui host/evdi/evdi_helper dist/uscreen-$(VERSION)/bin/
 	cp scripts/install.sh scripts/uscreen.desktop scripts/uscreen.service dist/uscreen-$(VERSION)/scripts/
+	cp packaging/uscreen-evdi.conf packaging/uscreen-modules.conf dist/uscreen-$(VERSION)/packaging/
 	cp README.md dist/uscreen-$(VERSION)/
 	cd android && ./gradlew assembleRelease -q && cp app/build/outputs/apk/release/app-release.apk ../dist/uscreen-$(VERSION)/uscreen.apk 2>/dev/null || true
 	tar -C dist -czf dist/uscreen-$(VERSION)-linux-x86_64.tar.gz uscreen-$(VERSION)
 	@echo "✓ Release: dist/uscreen-$(VERSION)-linux-x86_64.tar.gz"
-	@ls dist/uscreen-$(VERSION)/uscreen.apk 2>/dev/null && echo "✓ APK: dist/uscreen-$(VERSION)/uscreen.apk" || true
 
 clean:
 	cd host && $(CARGO) clean

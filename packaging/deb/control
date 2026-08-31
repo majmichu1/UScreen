@@ -1,0 +1,12 @@
+Package: uscreen
+Version: 1.1.0
+Section: video
+Priority: optional
+Architecture: amd64
+Depends: evdi-dkms, libevdi1, ffmpeg, adb | android-tools-adb, libdrm2
+Maintainer: majmichu1 <157926347+majmichu1@users.noreply.github.com>
+Homepage: https://github.com/majmichu1/UScreen
+Description: Android tablet as a USB second display and graphics tablet
+ Turns an Android tablet into a low-latency second monitor for a KDE Wayland
+ desktop over USB, with touch and stylus (pressure, tilt, eraser) forwarded
+ back. Can also act as a plain graphics tablet for the host's own screen.

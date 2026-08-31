@@ -21,18 +21,28 @@ Inspired by SuperDisplay for Windows. Built for Linux (Bazzite, Fedora, Arch, et
 
 ## Install (releases)
 
-**Linux:** download `uscreen-*-linux-x86_64.tar.gz` from the releases page, extract, run:
+Every release ships:
+
+| file | for |
+| --- | --- |
+| `uscreen_<ver>_amd64.deb` | Debian, Ubuntu, Mint, Pop — `sudo apt install ./uscreen_*.deb` pulls `evdi-dkms`, `libevdi1`, `ffmpeg` and `adb` for you |
+| `uscreen-<ver>-1.x86_64.rpm` | openSUSE (`zypper install ./uscreen-*.rpm`), Fedora (`dnf install ./uscreen-*.rpm` — then build evdi from source, it is not packaged there) |
+| `packaging/arch/PKGBUILD` | Arch and derivatives — `makepkg -si` in that directory pulls `evdi-dkms` from the AUR |
+| `uscreen-<ver>-linux-x86_64.tar.gz` | anything else — extract, run `./scripts/install.sh` |
+| `uscreen.apk` | the tablet |
+
+The Linux binaries are built against Debian 12's glibc (2.36), so they run on
+any distribution released since. Earlier releases were built on a rolling
+system and needed glibc 2.43, which nothing but Arch and Fedora had — if you
+downloaded 1.0.x on Debian or Ubuntu and got `GLIBC_2.43' not found`, that was
+why.
+
+After installing a package, enable the daemon for your login session:
 
 ```bash
-./scripts/install.sh
+systemctl --user enable --now uscreen
 ```
 
-This installs the dependencies for your distro, the binaries, a desktop entry
-("UScreen" in your app menu) and does the one-time system setup. The GUI also
-detects a missing setup and offers to fix it with one click.
-
-**Android:** download `uscreen.apk` from the releases page onto the tablet and
-open it (allow installing from unknown sources). Works on Android 8+.
 
 ## How it works
 
@@ -150,6 +160,32 @@ If auto-forward fails, run manually:
 adb reverse tcp:8890 tcp:8890
 adb reverse tcp:8891 tcp:8891
 ```
+
+## Security
+
+Both ports (video 8890, input 8891) bind to loopback only and the tablet
+reaches them through `adb reverse`. Since 1.1.0 that is not the whole story:
+
+- **Session token.** The daemon generates a random token per run and hands it
+  to the app as an intent extra when it launches it over adb. A client that
+  does not present it first gets no video and cannot inject input. Without
+  this, any process on the machine — or any other app on the tablet — could
+  connect to the loopback ports, read the screen and drive the mouse. If you
+  start the app by hand it will be dropped once, and the daemon immediately
+  relaunches it with the token. `require_token = false` in the config turns
+  this off, for an app older than 1.1.0.
+- **Capture FIFO** lives in `$XDG_RUNTIME_DIR/uscreen/` with mode 0600. It used
+  to be `/tmp/uscreen_capture.fifo` with mode 0666, which let any local
+  account read the raw frames — a live copy of the screen.
+- WebSocket messages are capped at 64 KiB.
+
+## Updates
+
+The daemon asks GitHub once a day whether a newer release exists and says so
+in the tray icon and in `uscreen doctor`. The app checks when you open its
+settings sheet. Neither installs anything: on Linux that is your package
+manager's job, and Android always asks before installing a sideloaded APK.
+`check_updates = false` turns the daemon's check off.
 
 ## Settings
 
