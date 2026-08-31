@@ -536,7 +536,7 @@ fn find_helper(path: &std::path::Path) -> PathBuf {
         }
     }
 
-    path.clone()
+    path.to_path_buf()
 }
 
 /// Keeps watching for the tablet. On every (re)connect: set up reverse port
@@ -554,6 +554,13 @@ async fn adb_monitor(
 ) {
     let mut current: Option<String> = None;
     let mut last_relaunch = std::time::Instant::now() - std::time::Duration::from_secs(60);
+
+    // Without adb nothing below can ever succeed, and a loop that polls a
+    // missing binary every two seconds in silence looks exactly like a
+    // daemon that is working and simply has no tablet. Say so once.
+    if tokio::process::Command::new("adb").arg("version").output().await.is_err() {
+        error!("adb is not installed — the tablet can never be found. Install android-tools (or adb) and restart.");
+    }
 
     loop {
         let found = adb_device_serial().await;
