@@ -26,7 +26,7 @@ Every release ships:
 | file | for |
 | --- | --- |
 | `uscreen_<ver>_amd64.deb` | Debian, Ubuntu, Mint, Pop — `sudo apt install ./uscreen_*.deb` pulls `evdi-dkms`, `libevdi1`, `ffmpeg` and `adb` for you |
-| `uscreen-<ver>-1.x86_64.rpm` | openSUSE (`zypper install ./uscreen-*.rpm`), Fedora (`dnf install ./uscreen-*.rpm` — then build evdi from source, it is not packaged there) |
+| `uscreen-<ver>-1.x86_64.rpm` | openSUSE (`zypper install ./uscreen-*.rpm`). Fedora: enable RPM Fusion first (`ffmpeg` is not in the stock repos, so the rpm's dependency cannot resolve without it), then `dnf install --allowerasing ./uscreen-*.rpm`, then build evdi from source — it is not packaged there |
 | `packaging/arch/PKGBUILD` | Arch and derivatives — `makepkg -si` in that directory pulls `evdi-dkms` from the AUR |
 | `uscreen-<ver>-linux-x86_64.tar.gz` | anything else — extract, run `./scripts/install.sh` |
 | `uscreen.apk` | the tablet |

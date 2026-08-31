@@ -496,18 +496,36 @@ fn find_helper(path: &std::path::Path) -> PathBuf {
         return path.to_path_buf();
     }
 
-    // Wherever an installer may have put it: the per-user install script,
-    // then the locations a system package uses. Checked before the source
-    // tree so a packaged install never picks up a stale checkout.
-    let candidates = [
-        format!("{}/.local/bin/evdi_helper", home),
-        "/usr/lib/uscreen/evdi_helper".to_string(),
-        "/usr/lib64/uscreen/evdi_helper".to_string(),
-        "/usr/libexec/uscreen/evdi_helper".to_string(),
-        "/usr/local/lib/uscreen/evdi_helper".to_string(),
-    ];
-    for c in candidates {
-        let p = PathBuf::from(c);
+    // The helper that belongs to *this* install first, derived from where
+    // this binary lives: next to it (install.sh puts both in ~/.local/bin),
+    // or ../lib/uscreen and ../lib64/uscreen (packages put uscreen in
+    // /usr/bin and the helper under /usr/lib*/uscreen). Only then the
+    // generic locations. A packaged /usr/bin/uscreen must never pick up a
+    // stale ~/.local/bin/evdi_helper left by an earlier install.sh - one
+    // built against the old, too-short evdi header, say.
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("evdi_helper"));
+            if let Some(prefix) = dir.parent() {
+                candidates.push(prefix.join("lib/uscreen/evdi_helper"));
+                candidates.push(prefix.join("lib64/uscreen/evdi_helper"));
+                candidates.push(prefix.join("libexec/uscreen/evdi_helper"));
+            }
+        }
+    }
+    candidates.extend(
+        [
+            format!("{}/.local/bin/evdi_helper", home),
+            "/usr/lib/uscreen/evdi_helper".to_string(),
+            "/usr/lib64/uscreen/evdi_helper".to_string(),
+            "/usr/libexec/uscreen/evdi_helper".to_string(),
+            "/usr/local/lib/uscreen/evdi_helper".to_string(),
+        ]
+        .into_iter()
+        .map(PathBuf::from),
+    );
+    for p in candidates {
         if p.exists() {
             return p;
         }
@@ -676,17 +694,41 @@ async fn on_tablet_connected(
 /// Start (or re-front) the app, handing it the session token as an intent
 /// extra. The activity is singleTask, so a running app receives it through
 /// onNewIntent rather than being restarted.
+///
+/// The command goes to `adb shell` on stdin, not as arguments. Anything in
+/// argv is readable by every local process for as long as the adb client
+/// runs (/proc/<pid>/cmdline is world-readable), which would hand the token
+/// to exactly the attacker it exists to keep out — and a failed auth on the
+/// control socket can make the daemon spawn this on demand.
 async fn launch_app(serial: &str, token: Option<&str>) {
-    let mut args: Vec<String> = vec![
-        "-s".into(), serial.into(), "shell".into(), "am".into(), "start".into(),
-        "-n".into(), "com.uscreen/.MainActivity".into(),
-    ];
+    use tokio::io::AsyncWriteExt;
+    let mut cmd = String::from("am start -n com.uscreen/.MainActivity");
     if let Some(t) = token {
-        args.extend(["--es".into(), "token".into(), t.into()]);
+        // Hex only, so no quoting is needed and nothing can break out.
+        cmd.push_str(" --es token ");
+        cmd.push_str(t);
     }
-    let r = tokio::process::Command::new("adb").args(&args).output().await;
-    match r {
-        Ok(o) if o.status.success() => info!("UScreen app launched on tablet"),
+    cmd.push_str(" >/dev/null 2>&1; exit\n");
+
+    let child = tokio::process::Command::new("adb")
+        .args(["-s", serial, "shell"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("Could not run adb: {}", e);
+            return;
+        }
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(cmd.as_bytes()).await;
+        let _ = stdin.shutdown().await;
+    }
+    match tokio::time::timeout(std::time::Duration::from_secs(15), child.wait()).await {
+        Ok(Ok(st)) if st.success() => info!("UScreen app launched on tablet"),
         _ => warn!("Could not launch the app (is it installed?)"),
     }
 }
