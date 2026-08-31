@@ -15,6 +15,7 @@ class TouchCapture {
     companion object {
         const val TAG = "UScreenTouch"
         const val WS_URL = "ws://127.0.0.1:8891"
+        private const val TOOL_TYPE_PALM = 6
         const val RECONNECT_DELAY_MS = 2000L
     }
 
@@ -132,6 +133,8 @@ class TouchCapture {
         }
     }
 
+    // The surface only forwards touches to the host; there is no click to perform.
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
     fun setSurfaceView(sv: SurfaceView) {
         surfaceView = sv
 
@@ -228,7 +231,7 @@ class TouchCapture {
                 // Drop palm contacts — Samsung sends TOOL_TYPE_PALM for
                 // unintentional palm-rest touches; forwarding them causes
                 // phantom scrolling on the Linux side.
-                if (event.getToolType(actionIndex) == 6 /* TOOL_TYPE_PALM, API 29+ */) {
+                if (isPalm(event, actionIndex)) {
                     return true
                 }
                 if (isPenLike(event, actionIndex)) {
@@ -243,7 +246,7 @@ class TouchCapture {
 
             MotionEvent.ACTION_MOVE -> {
                 for (i in 0 until pointerCount) {
-                    if (event.getToolType(i) == 6 /* TOOL_TYPE_PALM, API 29+ */) continue
+                    if (isPalm(event, i)) continue
                     if (isPenLike(event, i)) {
                         // Android batches several samples between frames.
                         // Forward the historical points too, otherwise fast
@@ -280,7 +283,7 @@ class TouchCapture {
 
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_POINTER_UP -> {
-                if (event.getToolType(actionIndex) == 6 /* TOOL_TYPE_PALM, API 29+ */) {
+                if (isPalm(event, actionIndex)) {
                     return true
                 }
                 if (isPenLike(event, actionIndex)) {
@@ -294,7 +297,7 @@ class TouchCapture {
 
             MotionEvent.ACTION_CANCEL -> {
                 for (i in 0 until pointerCount) {
-                    if (event.getToolType(i) == 6 /* TOOL_TYPE_PALM, API 29+ */) continue
+                    if (isPalm(event, i)) continue
                     sendTouch(event.getX(i) / vw,
                         event.getY(i) / vh,
                         0.0, 1, slotOf(event, i))
@@ -508,6 +511,16 @@ class TouchCapture {
             pendingMode = msg
         }
     }
+
+    /**
+     * MotionEvent.TOOL_TYPE_PALM exists from API 29. The value is stable
+     * (6) and older devices simply never report it, so comparing against the
+     * number is correct everywhere; the annotation only tells lint that the
+     * comparison is deliberate.
+     */
+    @android.annotation.SuppressLint("WrongConstant")
+    private fun isPalm(event: MotionEvent, index: Int): Boolean =
+        event.getToolType(index) == TOOL_TYPE_PALM
 
     fun isControlConnected(): Boolean = isConnected
 

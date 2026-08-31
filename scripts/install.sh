@@ -86,7 +86,7 @@ install_deps() {
                 warn "then run this script again."
             fi
             ;;
-        *suse*|*opensuse*)
+        *suse*)
             # The one distribution that has all of it in the default repos.
             # Split in two: the evdi kernel module package is tied to the
             # running kernel's ABI, and when that does not resolve it should

@@ -168,6 +168,7 @@ fn command_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[allow(clippy::field_reassign_with_default)]
 fn poll_status() -> Status {
     let mut s = Status::default();
 

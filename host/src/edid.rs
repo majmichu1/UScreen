@@ -119,8 +119,8 @@ pub fn make_edid_sized(
     edid[i + 6] = 145; // max V rate Hz
     edid[i + 7] = 30; // min H rate kHz
     edid[i + 8] = 255; // max H rate kHz
-    let max_pclk_mhz = (pixel_clock_10khz as u32 * 10_000 + 999_999) / 1_000_000;
-    edid[i + 9] = ((max_pclk_mhz + 9) / 10).min(255) as u8;
+    let max_pclk_mhz = (pixel_clock_10khz as u32 * 10_000).div_ceil(1_000_000);
+    edid[i + 9] = max_pclk_mhz.div_ceil(10).min(255) as u8;
     edid[i + 10] = 0x01; // GTF
     edid[i + 11..i + 18].copy_from_slice(b"\x0A      ");
 

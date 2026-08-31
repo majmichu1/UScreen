@@ -220,9 +220,9 @@ class VideoReceiver {
             } catch (_: Exception) {}
 
             // Low latency flags (safe to set, ignored if unsupported)
-            try {
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
                 format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-            } catch (_: Exception) {}
+            }
             try {
                 // Ask the decoder to run flat out rather than pace to the frame
                 // rate — headroom above the stream rate, so a late frame is

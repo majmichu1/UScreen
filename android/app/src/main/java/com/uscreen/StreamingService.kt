@@ -125,17 +125,15 @@ class StreamingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "UScreen Streaming",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Keeps UScreen alive while streaming"
-                setShowBadge(false)
-            }
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "UScreen Streaming",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Keeps UScreen alive while streaming"
+            setShowBadge(false)
         }
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(channel)
     }
 }

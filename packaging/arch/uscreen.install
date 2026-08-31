@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 post_install() {
   # initial_device_count is only read when evdi loads. If it is already
   # loaded, reload it so a device exists without a reboot.

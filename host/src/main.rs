@@ -483,14 +483,14 @@ fn get_pid_path() -> PathBuf {
 /// An explicitly given `--helper` always wins. It used to lose to the copy in
 /// `~/.local/bin`, so a freshly built helper was silently ignored in favour of
 /// whatever was last installed — the kind of thing that costs an afternoon.
-fn find_helper(path: &PathBuf) -> PathBuf {
+fn find_helper(path: &std::path::Path) -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
 
     if path.exists() {
         if let Ok(canon) = path.canonicalize() {
             return canon;
         }
-        return path.clone();
+        return path.to_path_buf();
     }
 
     // Wherever an installer may have put it: the per-user install script,

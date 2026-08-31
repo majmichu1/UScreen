@@ -456,6 +456,7 @@ impl UInputDevice {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn inject_pen(
         &mut self,
         x: i32,

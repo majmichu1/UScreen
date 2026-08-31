@@ -129,11 +129,7 @@ class MainActivity : ComponentActivity() {
 
         // Start foreground service to prevent Samsung from killing us
         val serviceIntent = Intent(this, StreamingService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
-        } else {
-            startService(serviceIntent)
-        }
+        startForegroundService(serviceIntent)
 
         // Enable fullscreen AFTER setContent so DecorView exists
         window.decorView.post {
