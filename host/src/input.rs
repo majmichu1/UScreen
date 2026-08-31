@@ -1036,7 +1036,15 @@ async fn handle_connection(
             _ => false,
         };
         if !ok {
-            warn!("Input client did not authenticate — dropped. Re-sending the token to the app.");
+            // The app reconnects every two seconds; after a handful of these
+            // the log has made its point.
+            static DROPS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = DROPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n < 5 {
+                warn!("Input client did not authenticate — dropped. Re-sending the token to the app.");
+            } else if n == 5 {
+                warn!("Further unauthenticated clients will be dropped quietly.");
+            }
             // Most likely the app was started by hand and never received a
             // token. Launching it again over adb delivers one.
             relaunch.notify_one();

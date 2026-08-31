@@ -823,8 +823,13 @@ async fn adb_monitor(
     // too old to send one fails auth on every reconnect, and without a cap
     // that is an `am start` every five seconds for as long as it stays
     // plugged in. Reset whenever a tablet (re)connects.
+    // Exponential backoff rather than a hard cap: after the app is updated
+    // the next delivery must still happen without re-plugging the tablet,
+    // but an app that can never authenticate must not cost an `am start`
+    // every five seconds forever. 5s, 10s, 20s ... up to ten minutes.
     let mut relaunches: u32 = 0;
-    const MAX_RELAUNCHES: u32 = 3;
+    let mut relaunch_wait = std::time::Duration::from_secs(5);
+    const RELAUNCH_WAIT_MAX: std::time::Duration = std::time::Duration::from_secs(600);
     // Further tablets, by serial.
     let mut extras: std::collections::HashMap<String, ExtraSession> = std::collections::HashMap::new();
 
@@ -860,6 +865,7 @@ async fn adb_monitor(
                 let _ = tablet_tx.send(true);
                 current = found.clone();
                 relaunches = 0;
+                relaunch_wait = std::time::Duration::from_secs(5);
             }
             (Some(old), Some(serial)) if old != serial => {
                 // Usually not a different tablet at all: pulling the cable on a
@@ -880,6 +886,7 @@ async fn adb_monitor(
                 let _ = tablet_tx.send(true);
                 current = found.clone();
                 relaunches = 0;
+                relaunch_wait = std::time::Duration::from_secs(5);
             }
             (Some(old), None) => {
                 info!("Tablet disconnected ({})", old);
@@ -939,20 +946,19 @@ async fn adb_monitor(
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {}
             _ = relaunch.notified() => {
                 if let Some(serial) = current.as_deref() {
-                    if relaunches >= MAX_RELAUNCHES {
-                        if relaunches == MAX_RELAUNCHES {
-                            relaunches += 1;
-                            warn!(
-                                "A client keeps connecting without a valid token and relaunching \
-                                 the app has not helped. Update the UScreen app on the tablet \
-                                 (1.1.0 or newer); giving up until it is reconnected."
-                            );
-                        }
-                    } else if last_relaunch.elapsed() >= std::time::Duration::from_secs(5) {
+                    if last_relaunch.elapsed() >= relaunch_wait {
                         last_relaunch = std::time::Instant::now();
                         relaunches += 1;
-                        info!("Delivering the session token to the app ({}/{})", relaunches, MAX_RELAUNCHES);
+                        if relaunches == 3 {
+                            warn!(
+                                "A client keeps connecting without a valid token. Update the \
+                                 UScreen app on the tablet (1.1.0 or newer); the token will be \
+                                 delivered again, less and less often, until it works."
+                            );
+                        }
+                        info!("Delivering the session token to the app (attempt {}, next in {:?})", relaunches, relaunch_wait.min(RELAUNCH_WAIT_MAX));
                         launch_app(serial, token.as_deref()).await;
+                        relaunch_wait = (relaunch_wait * 2).min(RELAUNCH_WAIT_MAX);
                     }
                 }
             }
