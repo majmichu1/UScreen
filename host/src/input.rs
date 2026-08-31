@@ -69,6 +69,38 @@ const PRODUCT_POINTER: u16 = 0x0003;
 const TOUCH_DEVICE_NAME: &str = "UScreen Touch";
 const PEN_DEVICE_NAME: &str = "UScreen Pen";
 const POINTER_DEVICE_NAME: &str = "UScreen Pointer";
+
+/// Device names and product ids for the N-th tablet. The first keeps the
+/// original names and ids so existing KWin input mappings stay valid; every
+/// further one gets a numbered name and its own product range, since KWin
+/// keys its per-device settings on vendor/product/name.
+#[derive(Clone, Debug)]
+pub struct DeviceIdentity {
+    pub touch: String,
+    pub pen: String,
+    pub pointer: String,
+    pub product_touch: u16,
+    pub product_pen: u16,
+    pub product_pointer: u16,
+}
+
+impl DeviceIdentity {
+    pub fn for_instance(instance: u32) -> Self {
+        let suffix = if instance == 0 { String::new() } else { format!(" {}", instance + 1) };
+        let base = (instance as u16) * 16;
+        Self {
+            touch: format!("{}{}", TOUCH_DEVICE_NAME, suffix),
+            pen: format!("{}{}", PEN_DEVICE_NAME, suffix),
+            pointer: format!("{}{}", POINTER_DEVICE_NAME, suffix),
+            product_touch: PRODUCT_TOUCH + base,
+            product_pen: PRODUCT_PEN + base,
+            product_pointer: PRODUCT_POINTER + base,
+        }
+    }
+    fn owns(&self, name: &str) -> bool {
+        name == self.touch || name == self.pen || name == self.pointer
+    }
+}
 /// ~310mm wide active area → 65535/310 ≈ 211 units/mm.
 /// libinput requires a resolution on touchscreen/tablet axes.
 const RESOLUTION_UNITS_PER_MM: i32 = 211;
@@ -185,6 +217,9 @@ pub struct InputResponse {
 #[derive(Clone)]
 pub struct InputConfig {
     pub port: u16,
+    /// Which tablet this server belongs to (0 = the first). Decides device
+    /// names, product ids, and which virtual output the devices map to.
+    pub instance: u32,
     /// Session token the client must present first; `None` disables it.
     pub token: Option<String>,
     /// Bitstream the encoder produces, so connecting clients can be told.
@@ -197,6 +232,7 @@ impl Default for InputConfig {
     fn default() -> Self {
         Self {
             port: 8891,
+            instance: 0,
             token: None,
             codec: "h264".into(),
             virtual_width: 2960,
@@ -232,7 +268,7 @@ impl UInputDevice {
     }
 
     /// Touchscreen device: multitouch + single-touch axes, INPUT_PROP_DIRECT.
-    fn new_touch(name: &str) -> Result<Self> {
+    fn new_touch(name: &str, product: u16) -> Result<Self> {
         let file = Self::open_uinput()?;
         let fd = file.as_raw_fd();
         let w = COORD_MAX + 1;
@@ -256,7 +292,7 @@ impl UInputDevice {
             Self::abs_setup(fd, ABS_MT_TRACKING_ID, 0, 65535, 0)?;
             Self::abs_setup(fd, ABS_MT_PRESSURE, 0, 4096, 0)?;
 
-            Self::dev_setup_and_create(fd, name, PRODUCT_TOUCH)?;
+            Self::dev_setup_and_create(fd, name, product)?;
         }
 
         info!("uinput touchscreen '{}' created", name);
@@ -269,7 +305,7 @@ impl UInputDevice {
     /// activate the on-screen keyboard on every pen tap. Without it, libinput
     /// classifies this as a tablet tool (Wacom-style): the cursor follows the
     /// pen position and clicks work as mouse clicks.
-    fn new_pen(name: &str) -> Result<Self> {
+    fn new_pen(name: &str, product: u16) -> Result<Self> {
         let file = Self::open_uinput()?;
         let fd = file.as_raw_fd();
         let w = COORD_MAX + 1;
@@ -295,7 +331,7 @@ impl UInputDevice {
             Self::abs_setup(fd, ABS_TILT_X, -90, 90, 0)?;
             Self::abs_setup(fd, ABS_TILT_Y, -90, 90, 0)?;
 
-            Self::dev_setup_and_create(fd, name, PRODUCT_PEN)?;
+            Self::dev_setup_and_create(fd, name, product)?;
         }
 
         info!("uinput pen tablet '{}' created", name);
@@ -313,7 +349,7 @@ impl UInputDevice {
     /// No INPUT_PROP_DIRECT (that would make it a touchscreen and bring the
     /// on-screen keyboard with it) and no BTN_TOOL_PEN (that would make it a
     /// second tablet).
-    fn new_pointer(name: &str) -> Result<Self> {
+    fn new_pointer(name: &str, product: u16) -> Result<Self> {
         let file = Self::open_uinput()?;
         let fd = file.as_raw_fd();
         let w = COORD_MAX + 1;
@@ -325,7 +361,7 @@ impl UInputDevice {
             Self::ioctl_val(fd, UI_SET_KEYBIT, BTN_LEFT as i32)?;
             Self::abs_setup(fd, ABS_X, 0, w - 1, RESOLUTION_UNITS_PER_MM)?;
             Self::abs_setup(fd, ABS_Y, 0, w - 1, RESOLUTION_UNITS_PER_MM)?;
-            Self::dev_setup_and_create(fd, name, PRODUCT_POINTER)?;
+            Self::dev_setup_and_create(fd, name, product)?;
         }
 
         info!("uinput pointer '{}' created", name);
@@ -678,7 +714,7 @@ async fn kwin_device_property(sysname: &str, property: &str) -> Option<String> {
 /// and finding it empty, both when written before and after device creation.
 /// Setting the property directly takes effect immediately, and KWin persists it
 /// itself.
-async fn map_devices_to_output(pen_only: bool) {
+async fn map_devices_to_output(pen_only: bool, ident: &DeviceIdentity, card: Option<u32>) {
     let output = if pen_only {
         match primary_non_evdi_output().await {
             Some(name) => name,
@@ -689,9 +725,12 @@ async fn map_devices_to_output(pen_only: bool) {
         }
     } else {
         let connectors = crate::vdisplay::evdi_connectors();
+        // This tablet's own card first; "any connected EVDI output" only as
+        // a fallback while the card is not known yet.
         match connectors
             .iter()
-            .find(|c| c.connected)
+            .find(|c| card.is_some_and(|want| c.card == want))
+            .or_else(|| connectors.iter().find(|c| c.connected))
             .or_else(|| connectors.first())
             .map(|c| c.name.clone())
         {
@@ -732,9 +771,7 @@ async fn map_devices_to_output(pen_only: bool) {
             let Some(name) = kwin_device_property(&sysname, "name").await else {
                 continue;
             };
-            if name != TOUCH_DEVICE_NAME
-                && name != PEN_DEVICE_NAME
-                && name != POINTER_DEVICE_NAME
+            if !ident.owns(&name)
             {
                 continue;
             }
@@ -785,6 +822,10 @@ pub struct InputServer {
     /// token to the app again over adb (a manually launched app never got
     /// one).
     relaunch: Arc<tokio::sync::Notify>,
+    /// The EVDI card this tablet's helper opened, once known. The devices are
+    /// mapped onto that card's connector, not onto "the first EVDI output" -
+    /// with two tablets that would put both pens on one screen.
+    card_rx: watch::Receiver<Option<u32>>,
 }
 
 impl InputServer {
@@ -794,6 +835,7 @@ impl InputServer {
         mode_tx: watch::Sender<bool>,
         latency: crate::latency::LatencyTracker,
         relaunch: Arc<tokio::sync::Notify>,
+        card_rx: watch::Receiver<Option<u32>>,
     ) -> Self {
         Self {
             config,
@@ -802,6 +844,7 @@ impl InputServer {
             mode_tx,
             latency,
             relaunch,
+            card_rx,
         }
     }
 
@@ -825,22 +868,24 @@ impl InputServer {
         //
         // Device creation sleeps to let udev settle, so it runs off the async
         // runtime rather than blocking a worker thread.
-        let devices = tokio::task::spawn_blocking(|| {
-            let touch = match UInputDevice::new_touch(TOUCH_DEVICE_NAME) {
+        let ident = DeviceIdentity::for_instance(self.config.instance);
+        let ident_bg = ident.clone();
+        let devices = tokio::task::spawn_blocking(move || {
+            let touch = match UInputDevice::new_touch(&ident_bg.touch, ident_bg.product_touch) {
                 Ok(dev) => Some(dev),
                 Err(e) => {
                     warn!("No touch device: {}. Touch will be logged only.", e);
                     None
                 }
             };
-            let pen = match UInputDevice::new_pen(PEN_DEVICE_NAME) {
+            let pen = match UInputDevice::new_pen(&ident_bg.pen, ident_bg.product_pen) {
                 Ok(dev) => Some(dev),
                 Err(e) => {
                     warn!("No pen device: {}. Pen will be logged only.", e);
                     None
                 }
             };
-            let pointer = match UInputDevice::new_pointer(POINTER_DEVICE_NAME) {
+            let pointer = match UInputDevice::new_pointer(&ident_bg.pointer, ident_bg.product_pointer) {
                 Ok(dev) => Some(dev),
                 Err(e) => {
                     warn!("No pointer device: {}. The cursor will vanish when the pen lifts.", e);
@@ -875,12 +920,20 @@ impl InputServer {
         // would otherwise stay down on a screen that is no longer listening.
         {
             let mut mode_rx = self.mode_tx.subscribe();
+            let mut card_rx = self.card_rx.clone();
             let devices = uinput.clone();
+            let ident_map = ident.clone();
             let initial = *mode_rx.borrow_and_update();
-            map_devices_to_output(initial).await;
+            let card0 = *card_rx.borrow_and_update();
+            map_devices_to_output(initial, &ident_map, card0).await;
             tokio::spawn(async move {
-                while mode_rx.changed().await.is_ok() {
+                loop {
+                    tokio::select! {
+                        r = mode_rx.changed() => { if r.is_err() { break; } }
+                        r = card_rx.changed() => { if r.is_err() { break; } }
+                    }
                     let pen_only = *mode_rx.borrow();
+                    let card = *card_rx.borrow();
                     if let Ok(mut guard) = devices.lock() {
                         guard.release_all();
                     }
@@ -890,10 +943,11 @@ impl InputServer {
                     // output it is still moving would not stick.
                     tokio::time::sleep(std::time::Duration::from_millis(600)).await;
                     info!(
-                        "Mode is now {} — remapping input devices",
-                        if pen_only { "pen-only" } else { "second screen" }
+                        "Mode is now {} — remapping input devices{}",
+                        if pen_only { "pen-only" } else { "second screen" },
+                        card.map(|c| format!(" (card{})", c)).unwrap_or_default()
                     );
-                    map_devices_to_output(pen_only).await;
+                    map_devices_to_output(pen_only, &ident_map, card).await;
                 }
             });
         }

@@ -37,7 +37,16 @@ pub fn runtime_dir() -> PathBuf {
 }
 
 pub fn fifo_path() -> PathBuf {
-    runtime_dir().join("capture.fifo")
+    fifo_path_for(0)
+}
+
+/// One FIFO per virtual display; the first keeps the old name.
+pub fn fifo_path_for(instance: u32) -> PathBuf {
+    if instance == 0 {
+        runtime_dir().join("capture.fifo")
+    } else {
+        runtime_dir().join(format!("capture-{}.fifo", instance))
+    }
 }
 
 fn token_path() -> PathBuf {

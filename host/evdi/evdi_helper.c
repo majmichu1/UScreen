@@ -34,6 +34,7 @@ static int g_mode_h = 0;
 static int g_mode_bpp = 4;
 static int g_mode_stride = 0;
 static volatile int g_have_mode = 0;
+static int g_pin_card = -1;
 static int g_dpms_on = 0;
 
 /* Triple buffer for FIFO writes: grabber packs into g_fill, swaps with
@@ -896,6 +897,11 @@ int main(int argc, char *argv[]) {
             g_scale = atoi(argv[++i]);
             if (g_scale < 1) g_scale = 1;
             if (g_scale > 4) g_scale = 4;
+        } else if (strcmp(argv[i], "--card") == 0 && i + 1 < argc) {
+            /* Pin a specific EVDI card. With several virtual displays each
+               helper must own its own; find_evdi_device() would hand every
+               one of them the same card. */
+            g_pin_card = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--fps") == 0 && i + 1 < argc) {
             g_fps = atoi(argv[++i]);
             if (g_fps < 1 || g_fps > 240) g_fps = 60;
@@ -926,7 +932,7 @@ int main(int argc, char *argv[]) {
        run) — adding a new DRM card on every restart floods the compositor
        with display hotplug events. */
     evdi_handle handle = EVDI_INVALID_HANDLE;
-    int dev_idx = find_evdi_device();
+    int dev_idx = g_pin_card >= 0 ? g_pin_card : find_evdi_device();
     if (dev_idx >= 0) {
         handle = evdi_open(dev_idx);
         if (handle != EVDI_INVALID_HANDLE) {

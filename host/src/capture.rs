@@ -19,6 +19,10 @@ pub fn fifo_path() -> String {
     crate::runtime::fifo_path().to_string_lossy().into_owned()
 }
 
+pub fn fifo_path_for(instance: u32) -> String {
+    crate::runtime::fifo_path_for(instance).to_string_lossy().into_owned()
+}
+
 
 /// Which bitstream syntax is in play. H.264 and HEVC agree on Annex B start
 /// codes and on nothing else that matters here: the NAL header is one byte
@@ -185,6 +189,12 @@ pub struct CaptureConfig {
     /// restart a stream.
     pub position: crate::config::Position,
     pub ten_bit: bool,
+    /// Which tablet this pipeline serves (0 = the first): picks the FIFO
+    /// name and, together with `card`, keeps two pipelines apart.
+    pub instance: u32,
+    /// EVDI card to pin the helper to. None lets the helper pick a free one,
+    /// which is only safe with a single tablet.
+    pub card: Option<u32>,
 }
 
 impl Default for CaptureConfig {
@@ -203,6 +213,8 @@ impl Default for CaptureConfig {
             stream_scale: 1,
             position: crate::config::Position::Right,
             ten_bit: false,
+            instance: 0,
+            card: None,
         }
     }
 }
@@ -239,6 +251,9 @@ pub struct CaptureManager {
     /// DRM card index the running helper attached to, used to address the
     /// virtual output unambiguously.
     helper_card: Option<u32>,
+    /// Published once the helper reports which card it opened, for whoever
+    /// needs to address this tablet's output (the input mapping does).
+    card_tx: watch::Sender<Option<u32>>,
     latency: crate::latency::LatencyTracker,
     /// Set by the stream server when a client attaches. The in-process encoder
     /// turns the next frame into a keyframe, so a client joining an idle screen
@@ -263,9 +278,15 @@ impl CaptureManager {
             stream_rx,
             helper_stdout_task: None,
             helper_card: None,
+            card_tx: watch::channel(None).0,
             latency: crate::latency::LatencyTracker::new(),
             idr_wanted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// Which EVDI card the helper opened; None until it has.
+    pub fn card_rx(&self) -> watch::Receiver<Option<u32>> {
+        self.card_tx.subscribe()
     }
 
     /// Shared with the input server, which receives the tablet's render
@@ -546,7 +567,7 @@ impl CaptureManager {
     }
 
     async fn start_helper(&mut self) -> Result<()> {
-        let fifo = fifo_path();
+        let fifo = fifo_path_for(self.config.instance);
         Self::ensure_fifo(&fifo)?;
 
         // Kill any stray helper from a previous run before spawning a new one.
@@ -604,6 +625,9 @@ impl CaptureManager {
         }
 
         cmd.args(["--capture-fifo", &fifo]);
+        if let Some(card) = self.config.card {
+            cmd.args(["--card", &card.to_string()]);
+        }
 
         cmd.stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -640,6 +664,7 @@ impl CaptureManager {
         }
 
         self.helper_card = Some(card);
+        let _ = self.card_tx.send(Some(card));
         // A fresh helper has not negotiated a mode yet.
         let _ = self.mode_tx.send(None);
         let _ = self.stream_tx.send(None);
@@ -769,7 +794,7 @@ impl CaptureManager {
             "-framerate".into(),
             fps.to_string(),
             "-i".into(),
-            fifo_path(),
+            fifo_path_for(self.config.instance),
         ]);
 
         if encoder == "h264_vaapi" {
@@ -1098,7 +1123,7 @@ impl CaptureManager {
                     );
                     tokio::task::spawn_blocking(move || {
                         crate::encoder::run(
-                            &fifo_path(), &name, w, h, fps, bitrate, quality, tx2, cc, idr, stopc,
+                            &fifo_path_for(self.config.instance), &name, w, h, fps, bitrate, quality, tx2, cc, idr, stopc,
                             lat,
                         )
                     })
@@ -1382,7 +1407,7 @@ impl CaptureManager {
         if let Some(mut child) = self.helper_child.take() {
             Self::terminate(&mut child, "evdi_helper").await;
         }
-        let _ = std::fs::remove_file(fifo_path());
+        let _ = std::fs::remove_file(fifo_path_for(self.config.instance));
     }
 
     /// SIGTERM first, then reap. The helper installs a SIGTERM handler and uses
@@ -1408,7 +1433,7 @@ impl CaptureManager {
 impl Drop for CaptureManager {
     fn drop(&mut self) {
         self.stop();
-        let _ = std::fs::remove_file(fifo_path());
+        let _ = std::fs::remove_file(fifo_path_for(self.config.instance));
     }
 }
 

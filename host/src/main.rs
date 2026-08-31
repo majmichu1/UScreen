@@ -196,6 +196,8 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         stream_scale,
         position: config::Position::parse_or_default(&file_cfg.position),
         ten_bit: file_cfg.ten_bit,
+        instance: 0,
+        card: None,
     };
 
     // One secret per daemon run. Handed to the app over adb when it is
@@ -222,6 +224,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
 
     let input_config = input::InputConfig {
         port: input_port,
+        instance: 0,
         token: token.clone(),
         codec: capture::Codec::from_encoder(&encoder).muxer().to_string(),
         virtual_width: width,
@@ -248,6 +251,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     });
 
     let mut capture_mgr = capture::CaptureManager::new(cap_config);
+    let card_rx = capture_mgr.card_rx();
     let codec_config = capture_mgr.codec_config_arc();
     let latency = capture_mgr.latency_tracker();
     let stream_srv =
@@ -258,6 +262,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         mode_tx.clone(),
         latency,
         relaunch.clone(),
+        card_rx,
     );
 
     // Deliberately shallow. This ring is pure latency when it fills: 256 frames
