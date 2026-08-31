@@ -787,8 +787,10 @@ async fn adb_monitor(
         // Test hook: pretend a serial is attached so a second pipeline can be
         // exercised with one physical tablet and a loopback client.
         if let Ok(fake) = std::env::var("USCREEN_FAKE_TABLET") {
-            if !fake.is_empty() && !devices.iter().any(|d| d == &fake) {
-                devices.push(fake);
+            for f in fake.split(',').map(str::trim).filter(|f| !f.is_empty()) {
+                if !devices.iter().any(|d| d == f) {
+                    devices.push(f.to_string());
+                }
             }
         }
         let found = devices.first().cloned();
@@ -802,7 +804,9 @@ async fn adb_monitor(
                     serial
                 );
                 announce_transport(serial);
-                on_tablet_connected(serial, video_port, input_port, auto_launch, token.as_deref()).await;
+                if !is_fake_serial(serial) {
+                    on_tablet_connected(serial, video_port, input_port, auto_launch, token.as_deref()).await;
+                }
                 let _ = tablet_tx.send(true);
                 current = found.clone();
                 relaunches = 0;
@@ -858,7 +862,9 @@ async fn adb_monitor(
                 };
                 info!("Tablet {} connected over {} ({})", instance + 1, transport_of(&serial).label(), serial);
                 let sess = spawn_extra_session(&extra, instance);
-                let is_fake = std::env::var("USCREEN_FAKE_TABLET").map(|f| f == serial).unwrap_or(false);
+                let is_fake = std::env::var("USCREEN_FAKE_TABLET")
+                    .map(|f| f.split(',').any(|x| x.trim() == serial))
+                    .unwrap_or(false);
                 if !is_fake {
                     on_tablet_connected(&serial, sess.video_port, sess.input_port, auto_launch, token.as_deref()).await;
                 }
@@ -903,7 +909,7 @@ async fn adb_monitor(
             _ = extra_relaunch => {
                 // Deliver the token to every extra tablet; cheap and rare.
                 for (serial, _) in extras.iter() {
-                    if std::env::var("USCREEN_FAKE_TABLET").map(|f| &f == serial).unwrap_or(false) { continue; }
+                    if std::env::var("USCREEN_FAKE_TABLET").map(|f| f.split(',').any(|x| x.trim() == serial)).unwrap_or(false) { continue; }
                     launch_app(serial, token.as_deref()).await;
                 }
             }
@@ -1020,6 +1026,12 @@ fn transport_of(serial: &str) -> Transport {
 /// Both can be present at once — `adb tcpip` leaves the cable working — and
 /// the order adb happens to list them in is not something to hang a latency
 /// difference on. USB wins whenever it is there.
+fn is_fake_serial(serial: &str) -> bool {
+    std::env::var("USCREEN_FAKE_TABLET")
+        .map(|f| f.split(',').any(|x| x.trim() == serial))
+        .unwrap_or(false)
+}
+
 /// Every device in state "device", USB entries first.
 async fn adb_devices() -> Vec<String> {
     let Ok(out) = tokio::process::Command::new("adb").arg("devices").output().await else {
