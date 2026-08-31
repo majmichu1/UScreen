@@ -32,7 +32,6 @@ install -Dm644 scripts/uscreen.desktop %{buildroot}%{_datadir}/applications/uscr
 install -Dm644 packaging/uscreen.service %{buildroot}%{_userunitdir}/uscreen.service
 install -Dm644 packaging/uscreen-evdi.conf    %{buildroot}%{_modprobedir}/uscreen-evdi.conf
 install -Dm644 packaging/uscreen-modules.conf %{buildroot}%{_modulesloaddir}/uscreen.conf
-%{_udevrulesdir}/60-uscreen-uinput.rules
 install -Dm644 packaging/60-uscreen-uinput.rules %{buildroot}%{_udevrulesdir}/60-uscreen-uinput.rules
 
 %post
@@ -58,3 +57,4 @@ udevadm trigger --name-match=uinput 2>/dev/null || true
 %{_userunitdir}/uscreen.service
 %{_modprobedir}/uscreen-evdi.conf
 %{_modulesloaddir}/uscreen.conf
+%{_udevrulesdir}/60-uscreen-uinput.rules
