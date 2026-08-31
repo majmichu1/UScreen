@@ -202,7 +202,27 @@ impl FileConfig {
             std::fs::create_dir_all(parent)?;
         }
         let text = toml::to_string_pretty(self).context("serialize config")?;
-        std::fs::write(&path, text).context("write config file")?;
+        // Say exactly which lines change. Settings that drift with nobody
+        // touching them are impossible to chase down otherwise.
+        if let Ok(old) = std::fs::read_to_string(&path) {
+            let before: std::collections::BTreeMap<&str, &str> = old
+                .lines()
+                .filter_map(|l| l.split_once(" = "))
+                .collect();
+            let changed: Vec<String> = text
+                .lines()
+                .filter_map(|l| l.split_once(" = "))
+                .filter(|(k, v)| before.get(k) != Some(v))
+                .map(|(k, v)| format!("{} = {} (was {})", k, v, before.get(k).unwrap_or(&"<unset>")))
+                .collect();
+            if !changed.is_empty() {
+                tracing::info!("Config written: {}", changed.join(", "));
+            }
+        }
+        // Write-then-rename: a reader must never see a half-written file.
+        let tmp = path.with_extension("toml.tmp");
+        std::fs::write(&tmp, text).context("write config file")?;
+        std::fs::rename(&tmp, &path).context("replace config file")?;
         Ok(())
     }
 }

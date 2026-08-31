@@ -149,6 +149,16 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         }
     }
 
+    // A daemon that lost its PID file (see remove_pid_file_if_ours) is still
+    // a daemon; two of them fight over the EVDI device and the FIFO.
+    let others = other_daemons();
+    if !others.is_empty() {
+        anyhow::bail!(
+            "uscreen daemon already running (PID {:?}, untracked). Run `uscreen stop` first.",
+            others
+        );
+    }
+
     // Write PID file for clean stop/status
     let pid = std::process::id();
     std::fs::write(&pid_path, pid.to_string())?;
@@ -503,10 +513,50 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     }
 
     // Clean up PID file
-    let _ = std::fs::remove_file(&pid_path);
+    // Only if it is still ours. Winding down takes a few seconds, and a
+    // daemon started in the meantime has already written its own PID here;
+    // deleting that leaves the new daemon untracked - doctor calls it an
+    // orphan and `uscreen stop` can no longer find it.
+    remove_pid_file_if_ours(&pid_path, pid);
 
     info!("uscreen daemon stopped");
     Ok(())
+}
+
+/// PIDs of every other `uscreen start` process of this user, found by
+/// process name plus argument rather than by grepping full command lines -
+/// `pgrep -f 'uscreen start'` also matched the shells running it, which is
+/// how `uscreen stop` used to kill the terminal it was typed into.
+fn other_daemons() -> Vec<u32> {
+    use std::os::unix::fs::MetadataExt;
+    let me = std::process::id();
+    let uid = unsafe { libc::getuid() };
+    let mut out = Vec::new();
+    let Ok(dir) = std::fs::read_dir("/proc") else { return out };
+    for e in dir.flatten() {
+        let Ok(pid) = e.file_name().to_string_lossy().parse::<u32>() else { continue };
+        if pid == me { continue; }
+        let base = e.path();
+        let Ok(comm) = std::fs::read_to_string(base.join("comm")) else { continue };
+        if comm.trim() != "uscreen" { continue; }
+        let Ok(cmd) = std::fs::read(base.join("cmdline")) else { continue };
+        if !cmd.split(|b| *b == 0).any(|a| a == b"start") { continue; }
+        // Same user only: another account's daemon is not ours to touch.
+        if std::fs::metadata(&base).map(|m| m.uid()).unwrap_or(u32::MAX) != uid { continue; }
+        out.push(pid);
+    }
+    out
+}
+
+fn remove_pid_file_if_ours(pid_path: &std::path::Path, pid: u32) {
+    let ours = std::fs::read_to_string(pid_path)
+        .ok()
+        .and_then(|t| t.trim().parse::<u32>().ok())
+        .map(|p| p == pid)
+        .unwrap_or(false);
+    if ours {
+        let _ = std::fs::remove_file(pid_path);
+    }
 }
 
 fn get_pid_path() -> PathBuf {
@@ -1114,33 +1164,17 @@ async fn stop_daemon() -> Result<()> {
             info!("uscreen daemon stopped");
         } else {
             // Fallback: try pkill but exclude our own PID
-            let my_pid = std::process::id().to_string();
-            tokio::process::Command::new("bash")
-                .args([
-                    "-c",
-                    &format!(
-                        "pgrep -f 'uscreen start' | grep -v {} | xargs -r kill -TERM",
-                        my_pid
-                    ),
-                ])
-                .output()
-                .await?;
+            for p in other_daemons() {
+                unsafe { libc::kill(p as i32, libc::SIGTERM); }
+            }
             let _ = std::fs::remove_file(&pid_path);
             info!("uscreen daemon stopped (fallback)");
         }
     } else {
         // No PID file, try pkill but exclude self
-        let my_pid = std::process::id().to_string();
-        tokio::process::Command::new("bash")
-            .args([
-                "-c",
-                &format!(
-                    "pgrep -f 'uscreen start' | grep -v {} | xargs -r kill -TERM",
-                    my_pid
-                ),
-            ])
-            .output()
-            .await?;
+        for p in other_daemons() {
+            unsafe { libc::kill(p as i32, libc::SIGTERM); }
+        }
         info!("uscreen daemon stopped (no PID file)");
     }
 
@@ -1169,14 +1203,11 @@ async fn show_status() -> Result<()> {
         }
     } else {
         // Fallback: pgrep excluding self
-        let out = tokio::process::Command::new("bash")
-            .args([
-                "-c",
-                &format!("pgrep -f 'uscreen start' | grep -v {}", my_pid),
-            ])
-            .output()
-            .await?;
-        let pids = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let pids = other_daemons()
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
         if !pids.is_empty() {
             println!("uscreen is running (PID: {})", pids);
         } else {
