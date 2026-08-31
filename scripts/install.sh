@@ -179,7 +179,7 @@ system_setup() {
     # set -e a missing one used to kill the whole script here, silently, with
     # the binaries already copied and the udev rule not yet installed.
     sudo mkdir -p /etc/modprobe.d /etc/modules-load.d
-    echo "options evdi initial_device_count=1" | sudo tee /etc/modprobe.d/uscreen-evdi.conf >/dev/null \
+    echo "options evdi initial_device_count=2" | sudo tee /etc/modprobe.d/uscreen-evdi.conf >/dev/null \
         || warn "Could not write /etc/modprobe.d/uscreen-evdi.conf"
     printf "evdi\nuinput\n" | sudo tee /etc/modules-load.d/uscreen.conf >/dev/null \
         || warn "Could not write /etc/modules-load.d/uscreen.conf"

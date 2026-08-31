@@ -109,7 +109,7 @@ fn check_modules(r: &mut Report) {
                 // so writing the modprobe.d file is not enough on a machine
                 // where evdi is already resident. Both halves matter.
                 r.hint(
-                    "for every boot: echo 'options evdi initial_device_count=1' | sudo tee \
+                    "for every boot: echo 'options evdi initial_device_count=2' | sudo tee \
                      /etc/modprobe.d/uscreen-evdi.conf && sudo modprobe -r evdi && sudo modprobe evdi",
                 );
             }
@@ -601,6 +601,23 @@ fn check_config(r: &mut Report, cfg: &FileConfig) {
         .ok()
         .and_then(|t| toml::from_str(&t).ok());
     r.line(Level::Ok, "config file", &format!("{}", path.display()));
+    if cfg.max_tablets > 1 {
+        let cards = crate::vdisplay::evdi_cards().len() as u32;
+        if cards >= cfg.max_tablets {
+            r.line(Level::Ok, "tablet slots", &format!("{} (EVDI devices: {})", cfg.max_tablets, cards));
+        } else {
+            r.line(
+                Level::Warn,
+                "tablet slots",
+                &format!("{} wanted, but only {} EVDI device(s) exist", cfg.max_tablets, cards),
+            );
+            r.hint(&format!(
+                "for this boot: echo 1 | sudo tee /sys/devices/evdi/add   (repeat {} time(s)); \
+                 for every boot: initial_device_count={} in /etc/modprobe.d/uscreen-evdi.conf",
+                cfg.max_tablets - cards, cfg.max_tablets
+            ));
+        }
+    }
     r.line(
         Level::Ok,
         "screen position",

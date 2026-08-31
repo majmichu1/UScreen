@@ -164,7 +164,7 @@ fn evdi_setup_problem_in(dir: &std::path::Path) -> Option<String> {
     Some(
         "No EVDI device exists and /sys/devices/evdi/add is root-only, so one cannot be \
          created. Fix it for this boot with:\n    echo 1 | sudo tee /sys/devices/evdi/add\n\
-         and for every boot with:\n    echo 'options evdi initial_device_count=1' | sudo tee \
+         and for every boot with:\n    echo 'options evdi initial_device_count=2' | sudo tee \
          /etc/modprobe.d/uscreen-evdi.conf\n    sudo modprobe -r evdi && sudo modprobe evdi\n\
          Then run: uscreen doctor"
             .to_string(),

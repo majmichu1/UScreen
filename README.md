@@ -95,7 +95,7 @@ The helper needs an EVDI device to exist, and creating one means writing to
 echo 1 | sudo tee /sys/devices/evdi/add
 
 # for every boot
-echo 'options evdi initial_device_count=1' | sudo tee /etc/modprobe.d/uscreen-evdi.conf
+echo 'options evdi initial_device_count=2' | sudo tee /etc/modprobe.d/uscreen-evdi.conf
 sudo modprobe -r evdi && sudo modprobe evdi
 ```
 
@@ -201,6 +201,19 @@ Settings live in `~/.config/uscreen/config.toml` and can be changed from three p
 - **The tablet app** — tap the ⚙ handle in the top-right corner; bitrate and fps apply live
 - **CLI flags** — override the config file for one run (e.g. `uscreen --bitrate 30000 start`)
 - **The tray icon** — mode switch, settings, quit
+
+### More than one tablet
+
+`max_tablets` (default 1, up to 4) lets several tablets attach at once, each
+as its own virtual screen with its own pen and touch devices. Every slot needs
+an EVDI device of its own; the installer and the packages set
+`initial_device_count=2`, and `uscreen doctor` says if more are needed.
+
+The second tablet uses ports 8892/8893 on the host (the base ports plus two
+per slot); on the tablet side nothing changes, `adb reverse` maps them per
+device. Tested with one real tablet plus a loopback stand-in
+(`scripts/fake-tablet.py` with `USCREEN_FAKE_TABLET=…`), not yet with two
+physical tablets.
 
 ### Where the screen sits
 
@@ -529,13 +542,9 @@ sudo modprobe evdi
 
 ### Next
 
-- [ ] **Several tablets at once**, each as its own virtual screen. Everything
-      below the daemon is currently single-instance — one helper, one FIFO,
-      one EDID, one video port, one input port, one set of uinput devices — so
-      this is a real piece of work rather than a loop. It is not in 1.0
-      because it could not be honestly tested: verifying it needs a second
-      tablet, and shipping a feature nobody has run is worse than not shipping
-      it.
+- [x] **Several tablets at once**, each as its own virtual screen
+      (`max_tablets`). Verified with one tablet plus a loopback stand-in;
+      a report from anyone with two real tablets would be welcome.
 - [ ] **AOA transport.** Would remove the USB debugging requirement, which is
       the last thing between this and simply plugging a cable in.
 

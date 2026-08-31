@@ -27,6 +27,7 @@ struct FileConfig {
     ten_bit: bool,
     require_token: bool,
     check_updates: bool,
+    max_tablets: u32,
     auto_resolution: bool,
     video_port: u16,
     input_port: u16,
@@ -48,6 +49,7 @@ impl Default for FileConfig {
             ten_bit: false,
             require_token: true,
             check_updates: true,
+            max_tablets: 1,
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,
@@ -218,7 +220,7 @@ fn poll_status() -> Status {
 /// pre-create an EVDI device now and at every boot.
 fn run_system_setup() -> Result<(), String> {
     let script = "set -e; \
-        echo 'options evdi initial_device_count=1' > /etc/modprobe.d/uscreen-evdi.conf; \
+        echo 'options evdi initial_device_count=2' > /etc/modprobe.d/uscreen-evdi.conf; \
         printf 'evdi\nuinput\n' > /etc/modules-load.d/uscreen.conf; \
         modprobe evdi || true; modprobe uinput || true; \
         if [ \"$(cat /sys/devices/evdi/count 2>/dev/null || echo 0)\" = \"0\" ]; then echo 1 > /sys/devices/evdi/add; fi";
@@ -613,6 +615,15 @@ impl eframe::App for App {
 
                     ui.label("Updates");
                     ui.checkbox(&mut self.cfg.check_updates, "Check for a newer release on start");
+                    ui.end_row();
+
+                    ui.label("Tablets");
+                    ui.vertical(|ui| {
+                        ui.add(egui::Slider::new(&mut self.cfg.max_tablets, 1..=4).text("at once"));
+                        ui.label(egui::RichText::new(
+                            "Each tablet becomes its own screen. Needs that many EVDI devices \
+                             (see uscreen doctor); the installer prepares two.").small().weak());
+                    });
                     ui.end_row();
 
                     ui.label("Position");
