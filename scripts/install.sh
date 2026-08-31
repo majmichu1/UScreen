@@ -175,8 +175,14 @@ install_files() {
 
 system_setup() {
     info "System setup (needs sudo): EVDI device at every boot"
-    echo "options evdi initial_device_count=1" | sudo tee /etc/modprobe.d/uscreen-evdi.conf >/dev/null
-    printf "evdi\nuinput\n" | sudo tee /etc/modules-load.d/uscreen.conf >/dev/null
+    # Neither directory is guaranteed to exist on a minimal install, and with
+    # set -e a missing one used to kill the whole script here, silently, with
+    # the binaries already copied and the udev rule not yet installed.
+    sudo mkdir -p /etc/modprobe.d /etc/modules-load.d
+    echo "options evdi initial_device_count=1" | sudo tee /etc/modprobe.d/uscreen-evdi.conf >/dev/null \
+        || warn "Could not write /etc/modprobe.d/uscreen-evdi.conf"
+    printf "evdi\nuinput\n" | sudo tee /etc/modules-load.d/uscreen.conf >/dev/null \
+        || warn "Could not write /etc/modules-load.d/uscreen.conf"
     sudo modprobe uinput 2>/dev/null || true
     # /dev/uinput is root-only on a stock system. Bazzite ships a rule that
     # opens it to the seat user; everyone else needs this one.
