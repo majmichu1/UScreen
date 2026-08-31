@@ -51,6 +51,41 @@ open it (allow installing from unknown sources). Works on Android 8+.
 - **EVDI kernel module** (`sudo modprobe evdi`)
 - **ffmpeg** with your preferred encoder
 
+### Where the packages come from
+
+`scripts/install.sh` handles this, but the picture differs enough between
+distributions to be worth writing down. Checked on each of them, not from
+memory:
+
+| | ffmpeg | adb | evdi |
+| --- | --- | --- | --- |
+| **Arch** | `ffmpeg` | `android-tools` | **AUR only**: `yay -S evdi-dkms` |
+| **Debian / Ubuntu** | `ffmpeg` | `adb` | `evdi-dkms` + `libevdi1` |
+| **Fedora** | needs RPM Fusion, and `--allowerasing` to replace `ffmpeg-free` | `android-tools` | **not packaged** — build from [DisplayLink/evdi](https://github.com/DisplayLink/evdi) |
+| **Bazzite / Nobara** | in the image | `android-tools` | in the image |
+
+Note for Debian: the runtime library is `libevdi1`. There is no `libevdi0`
+package, and `libevdi0-dev` is only a transitional one.
+
+### If the daemon keeps saying "Failed to start helper"
+
+The helper needs an EVDI device to exist, and creating one means writing to
+`/sys/devices/evdi/add`, which only root can do. Check `cat
+/sys/devices/evdi/count` — if it says 0:
+
+```bash
+# for this boot
+echo 1 | sudo tee /sys/devices/evdi/add
+
+# for every boot
+echo 'options evdi initial_device_count=1' | sudo tee /etc/modprobe.d/uscreen-evdi.conf
+sudo modprobe -r evdi && sudo modprobe evdi
+```
+
+The `modprobe -r` matters: `initial_device_count` is only read when the module
+loads, so writing the file does nothing on its own if evdi is already loaded.
+`uscreen doctor` checks all of this and prints the commands for you.
+
 ## Quick Start
 
 ### 1. Install dependencies

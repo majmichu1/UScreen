@@ -1,6 +1,6 @@
 .PHONY: all build build-helper install clean run android adb edid status stop list dist setup-system
 
-VERSION = 1.0.0
+VERSION = 1.0.1
 
 CARGO = cargo
 CC = gcc
