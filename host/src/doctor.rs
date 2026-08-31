@@ -103,11 +103,20 @@ fn check_modules(r: &mut Report) {
                 r.line(Level::Ok, "evdi module", &format!("{} device(s)", count));
             } else {
                 r.line(Level::Fail, "evdi module", "loaded, but no device created");
-                r.hint("echo 1 | sudo tee /sys/devices/evdi/add   (or run: make setup-system)");
+                r.hint("for this boot:   echo 1 | sudo tee /sys/devices/evdi/add");
+                // The one-shot write above does not survive a reboot, and
+                // initial_device_count is only read when the module loads —
+                // so writing the modprobe.d file is not enough on a machine
+                // where evdi is already resident. Both halves matter.
+                r.hint(
+                    "for every boot: echo 'options evdi initial_device_count=1' | sudo tee \
+                     /etc/modprobe.d/uscreen-evdi.conf && sudo modprobe -r evdi && sudo modprobe evdi",
+                );
             }
         }
         Err(_) => {
             r.line(Level::Fail, "evdi module", "not loaded");
+            r.hint("install evdi-dkms (on Arch it is in the AUR: yay -S evdi-dkms), then: sudo modprobe evdi");
             r.hint("sudo modprobe evdi   (install evdi-dkms if that fails)");
         }
     }

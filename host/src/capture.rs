@@ -120,6 +120,42 @@ pub struct EncoderSettings {
     pub stream_scale: u32,
 }
 
+/// Why the helper cannot get an EVDI device, in the words of someone who can
+/// fix it. Returns None when the state looks fine and the failure was
+/// something else.
+fn evdi_setup_problem() -> Option<String> {
+    let module_loaded = std::path::Path::new("/sys/devices/evdi").exists();
+    if !module_loaded {
+        return Some(
+            "The evdi kernel module is not loaded. Install it (evdi-dkms; on Arch it is in \
+             the AUR) and run: sudo modprobe evdi"
+                .to_string(),
+        );
+    }
+
+    let count: u32 = std::fs::read_to_string("/sys/devices/evdi/count")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    if count > 0 {
+        return None;
+    }
+
+    // The module is there but has no devices, and creating one needs a write
+    // to a root-only file. `initial_device_count` fixes it for good, but only
+    // takes effect when the module loads — which is why writing the
+    // modprobe.d file is not enough on a machine where evdi is already
+    // resident.
+    Some(
+        "No EVDI device exists and /sys/devices/evdi/add is root-only, so one cannot be \
+         created. Fix it for this boot with:\n    echo 1 | sudo tee /sys/devices/evdi/add\n\
+         and for every boot with:\n    echo 'options evdi initial_device_count=1' | sudo tee \
+         /etc/modprobe.d/uscreen-evdi.conf\n    sudo modprobe -r evdi && sudo modprobe evdi\n\
+         Then run: uscreen doctor"
+            .to_string(),
+    )
+}
+
 pub struct CaptureConfig {
     pub helper_path: PathBuf,
     /// Explicit EDID override; None = generate one for the configured mode
@@ -893,6 +929,7 @@ impl CaptureManager {
         // Exponential backoff: a crash-looping helper floods KWin with
         // display hotplug events, which can wedge the whole desktop.
         let mut backoff_ms: u64 = RECONNECT_DELAY_MS;
+        let mut explained_evdi = false;
         let mut pipeline_started_at = Instant::now();
         let mut mode_rx = self.mode_rx.clone();
         let mut stream_rx = self.stream_rx.clone();
@@ -942,10 +979,21 @@ impl CaptureManager {
             if self.helper_child.is_none() {
                 if let Err(e) = self.start_helper().await {
                     error!("Failed to start helper: {}. Retrying in {}ms...", e, backoff_ms);
+                    // Say why, once, instead of repeating an opaque line
+                    // forever. Retrying is right for a transient failure and
+                    // useless for a permissions problem, and the two look
+                    // identical from here without asking.
+                    if !explained_evdi {
+                        if let Some(reason) = evdi_setup_problem() {
+                            explained_evdi = true;
+                            error!("{}", reason);
+                        }
+                    }
                     tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
                     backoff_ms = (backoff_ms * 2).min(30_000);
                     continue;
                 }
+                explained_evdi = false;
                 pipeline_started_at = Instant::now();
             }
 
