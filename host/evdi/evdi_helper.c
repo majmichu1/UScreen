@@ -12,7 +12,10 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdint.h>
-#include "evdi_drm.h"
+/* Only the public client API. The headers are upstream libevdi 1.15's, kept
+   in sync with the library: the previous copies predated the
+   ddcci_data_handler member of evdi_event_context, so a struct one pointer
+   too short was being handed to a library that reads that member. */
 #include "evdi_lib.h"
 
 static evdi_handle g_handle = EVDI_INVALID_HANDLE;

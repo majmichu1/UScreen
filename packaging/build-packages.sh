@@ -18,6 +18,8 @@ distrobox enter "${USCREEN_BUILD_CONTAINER:-uscreen-build}" -- bash -lc '
   install -Dm755 $D/bin/uscreen        $R/usr/bin/uscreen
   install -Dm755 $D/bin/uscreen-gui    $R/usr/bin/uscreen-gui
   install -Dm755 $D/bin/evdi_helper    $R/usr/lib/uscreen/evdi_helper
+  install -Dm755 $D/bin/libevdi.so.1.15.0 $R/usr/lib/uscreen/libevdi.so.1.15.0
+  ln -sf libevdi.so.1.15.0 $R/usr/lib/uscreen/libevdi.so.1
   install -Dm644 scripts/uscreen.desktop $R/usr/share/applications/uscreen.desktop
   install -Dm644 scripts/uscreen.service $R/usr/lib/systemd/user/uscreen.service
   install -Dm644 packaging/uscreen-evdi.conf    $R/usr/lib/modprobe.d/uscreen-evdi.conf
@@ -32,7 +34,7 @@ distrobox enter "${USCREEN_BUILD_CONTAINER:-uscreen-build}" -- bash -lc '
   RB=$PWD/dist/rpmbuild; rm -rf $RB; mkdir -p $RB/{SOURCES,SPECS,BUILD,RPMS,SRPMS}
   cp dist/uscreen-$V-linux-x86_64.tar.gz $RB/SOURCES/
   sed "s/^Version:.*/Version:        $V/" packaging/rpm/uscreen.spec > $RB/SPECS/uscreen.spec
-  rpmbuild --define "_topdir $RB" --define "_userunitdir /usr/lib/systemd/user" \
+  rpmbuild --define "_topdir $RB" --define "_userunitdir /usr/lib/systemd/user" --define "_libdir /usr/lib64" \
            --define "_modprobedir /usr/lib/modprobe.d" --define "_modulesloaddir /usr/lib/modules-load.d" \
            -bb $RB/SPECS/uscreen.spec 2>&1 | grep -E "Wrote|error" 
   cp $RB/RPMS/x86_64/uscreen-$V-*.rpm dist/

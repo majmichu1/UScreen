@@ -6,17 +6,23 @@ pkgdesc="Use an Android tablet as a USB second display and graphics tablet (KDE 
 arch=('x86_64')
 url="https://github.com/majmichu1/UScreen"
 license=('MIT')
-depends=('evdi-dkms' 'ffmpeg' 'android-tools' 'libdrm')
-makedepends=('cargo' 'gcc')
+depends=('evdi-dkms' 'ffmpeg' 'android-tools')
+makedepends=('cargo' 'gcc' 'pkgconf' 'libdrm')
 install=uscreen.install
-source=("$pkgname-$pkgver.tar.gz::https://github.com/majmichu1/UScreen/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+_evdi=v1.15.0
+source=("$pkgname-$pkgver.tar.gz::https://github.com/majmichu1/UScreen/archive/refs/tags/v$pkgver.tar.gz"
+        "evdi-$_evdi.tar.gz::https://github.com/DisplayLink/evdi/archive/refs/tags/$_evdi.tar.gz")
+sha256sums=('SKIP' 'SKIP')
 
 build() {
   cd "UScreen-$pkgver/uscreen"
   cargo build --release --locked --manifest-path host/Cargo.toml
   cargo build --release --locked --manifest-path gui/Cargo.toml
-  gcc -O3 -o host/evdi/evdi_helper host/evdi/evdi_helper.c -levdi -ldrm -lpthread -Ihost/evdi
+  # libevdi built from upstream and shipped next to the helper (rpath $ORIGIN),
+  # so the only thing the system must provide is the evdi kernel module.
+  make -C "$srcdir/evdi-${_evdi#v}/library"
+  gcc -O3 -Ihost/evdi -o host/evdi/evdi_helper host/evdi/evdi_helper.c \
+      -L"$srcdir/evdi-${_evdi#v}/library" -levdi -lpthread -Wl,-rpath,'$ORIGIN'
 }
 
 package() {
@@ -24,6 +30,8 @@ package() {
   install -Dm755 target/release/uscreen     "$pkgdir/usr/bin/uscreen"
   install -Dm755 target/release/uscreen-gui "$pkgdir/usr/bin/uscreen-gui"
   install -Dm755 host/evdi/evdi_helper      "$pkgdir/usr/lib/uscreen/evdi_helper"
+  install -Dm755 "$srcdir/evdi-${_evdi#v}/library/libevdi.so.1.15.0" "$pkgdir/usr/lib/uscreen/libevdi.so.1.15.0"
+  ln -sf libevdi.so.1.15.0 "$pkgdir/usr/lib/uscreen/libevdi.so.1"
   install -Dm644 scripts/uscreen.desktop    "$pkgdir/usr/share/applications/uscreen.desktop"
   install -Dm644 scripts/uscreen.service    "$pkgdir/usr/lib/systemd/user/uscreen.service"
   install -Dm644 packaging/uscreen-evdi.conf "$pkgdir/usr/lib/modprobe.d/uscreen-evdi.conf"

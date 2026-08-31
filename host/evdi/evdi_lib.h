@@ -1,13 +1,21 @@
-/* SPDX-License-Identifier: LGPL-2.1-only */
+/* SPDX-License-Identifier: LGPL-2.1-or-later
+ * Copyright (c) 2015 - 2024 DisplayLink (UK) Ltd.
+ */
+
 #ifndef EVDI_LIB_H
 #define EVDI_LIB_H
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#define LIBEVDI_VERSION_MAJOR 1
+#define LIBEVDI_VERSION_MINOR 15
+#define LIBEVDI_VERSION_PATCH 0
 
 struct evdi_lib_version {
 	int version_major;
@@ -43,6 +51,7 @@ struct evdi_buffer {
 	int width;
 	int height;
 	int stride;
+
 	struct evdi_rect *rects;
 	int rect_count;
 };
@@ -64,13 +73,29 @@ struct evdi_cursor_move {
 	int32_t y;
 };
 
+struct evdi_ddcci_data {
+	uint16_t address;
+	uint16_t flags;
+	uint32_t buffer_length;
+	uint8_t *buffer;
+};
+
 struct evdi_event_context {
 	void (*dpms_handler)(int dpms_mode, void *user_data);
 	void (*mode_changed_handler)(struct evdi_mode mode, void *user_data);
 	void (*update_ready_handler)(int buffer_to_be_updated, void *user_data);
 	void (*crtc_state_handler)(int state, void *user_data);
-	void (*cursor_set_handler)(struct evdi_cursor_set cursor_set, void *user_data);
-	void (*cursor_move_handler)(struct evdi_cursor_move cursor_move, void *user_data);
+	void (*cursor_set_handler)(struct evdi_cursor_set cursor_set,
+				   void *user_data);
+	void (*cursor_move_handler)(struct evdi_cursor_move cursor_move,
+				    void *user_data);
+	void (*ddcci_data_handler)(struct evdi_ddcci_data ddcci_data,
+				   void *user_data);
+	void *user_data;
+};
+
+struct evdi_logging {
+	void (*function)(void *user_data, const char *fmt, ...);
 	void *user_data;
 };
 
@@ -79,17 +104,37 @@ struct evdi_event_context {
 enum evdi_device_status evdi_check_device(int device);
 evdi_handle evdi_open(int device);
 int evdi_add_device(void);
+// deprecated, use evdi_open_attached_to_fixed
+evdi_handle evdi_open_attached_to(const char *sysfs_parent_device);
+evdi_handle evdi_open_attached_to_fixed(const char *sysfs_parent_device, size_t length);
+
 void evdi_close(evdi_handle handle);
-void evdi_connect(evdi_handle handle, const unsigned char *edid, const unsigned int edid_length, const uint32_t sku_area_limit);
+void evdi_connect(evdi_handle handle, const unsigned char *edid,
+		  const unsigned int edid_length,
+		  const uint32_t sku_area_limit);
+void evdi_connect2(evdi_handle handle, const unsigned char *edid,
+		  const unsigned int edid_length,
+		  const uint32_t pixel_area_limit,
+		  const uint32_t pixel_per_second_limit);
 void evdi_disconnect(evdi_handle handle);
-void evdi_enable_cursor_events(evdi_handle handle);
-void evdi_grab_pixels(evdi_handle handle, struct evdi_rect *rects, int *num_rects);
+void evdi_enable_cursor_events(evdi_handle handle, bool enable);
+
+void evdi_grab_pixels(evdi_handle handle,
+		      struct evdi_rect *rects,
+		      int *num_rects);
 void evdi_register_buffer(evdi_handle handle, struct evdi_buffer buffer);
 void evdi_unregister_buffer(evdi_handle handle, int bufferId);
 bool evdi_request_update(evdi_handle handle, int bufferId);
+void evdi_ddcci_response(evdi_handle handle, const unsigned char *buffer,
+		const uint32_t buffer_length,
+		const bool result);
+
 void evdi_handle_events(evdi_handle handle, struct evdi_event_context *evtctx);
 evdi_selectable evdi_get_event_ready(evdi_handle handle);
 void evdi_get_lib_version(struct evdi_lib_version *version);
+void evdi_set_logging(struct evdi_logging evdi_logging);
+
+bool Xorg_running(void);
 
 #ifdef __cplusplus
 }

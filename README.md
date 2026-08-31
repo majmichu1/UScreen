@@ -37,6 +37,12 @@ system and needed glibc 2.43, which nothing but Arch and Fedora had — if you
 downloaded 1.0.x on Debian or Ubuntu and got `GLIBC_2.43' not found`, that was
 why.
 
+The helper ships with its own copy of libevdi (LGPL-2.1, from DisplayLink's
+upstream, unmodified) next to it, found through an `$ORIGIN` rpath — so the
+only thing your system has to provide is the evdi kernel module. Debian 12 has
+no libevdi package at all, and this is what makes the tarball and the .deb work
+there.
+
 After installing a package, enable the daemon for your login session:
 
 ```bash

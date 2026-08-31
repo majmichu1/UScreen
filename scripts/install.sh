@@ -155,6 +155,8 @@ install_files() {
     cp "$src_bin/uscreen-gui" "$BIN_DIR/uscreen-gui" 2>/dev/null || warn "uscreen-gui not found, skipping"
     if [ -f "$src_bin/evdi_helper" ]; then
         cp "$src_bin/evdi_helper" "$BIN_DIR/evdi_helper"
+        # The release helper finds libevdi next to itself ($ORIGIN rpath).
+        [ -f "$src_bin/libevdi.so.1.15.0" ] && cp -P "$src_bin"/libevdi.so.1* "$BIN_DIR/"
     else
         cp "$PROJECT_DIR/host/evdi/evdi_helper" "$BIN_DIR/evdi_helper"
     fi
