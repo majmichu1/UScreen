@@ -61,9 +61,14 @@ install_deps() {
             # libevdi0-dev is only a transitional package. Asking for the
             # wrong one made the whole line fail, and the fallback quietly
             # installed no library at all.
-            sudo apt-get install -y ffmpeg adb evdi-dkms libevdi1 libevdi-dev || \
-            sudo apt-get install -y ffmpeg android-tools-adb evdi-dkms || \
-                warn "Some packages could not be installed — check the names for your release"
+            # Userspace first, kernel module second: a dkms build that fails
+            # (no headers, unsupported kernel) must not stop ffmpeg and adb
+            # from being installed.
+            sudo apt-get install -y ffmpeg adb libevdi1 libevdi-dev || \
+            sudo apt-get install -y ffmpeg android-tools-adb libevdi1 || \
+                warn "Check the package names for your release"
+            sudo apt-get install -y evdi-dkms || \
+                warn "evdi-dkms did not install — you may need linux-headers-$(uname -r)"
             ;;
         *arch*|*manjaro*|*endeavouros*|*cachyos*)
             sudo pacman -S --needed --noconfirm ffmpeg android-tools
@@ -81,6 +86,20 @@ install_deps() {
                 warn "then run this script again."
             fi
             ;;
+        *suse*|*opensuse*)
+            # The one distribution that has all of it in the default repos.
+            # Split in two: the evdi kernel module package is tied to the
+            # running kernel's ABI, and when that does not resolve it should
+            # not take ffmpeg and adb down with it.
+            sudo zypper --non-interactive install --no-recommends \
+                ffmpeg android-tools || \
+                warn "Install ffmpeg and android-tools manually"
+            # libevdi1 requires evdi-kmp, so the library and the kernel module
+            # stand or fall together here — nothing to be gained by splitting
+            # them further.
+            sudo zypper --non-interactive install --no-recommends evdi libevdi1 || \
+                warn "evdi did not install — usually a kernel/module version mismatch"
+            ;;
         *)
             warn "Unknown distro. Install manually: ffmpeg, adb (android-tools), evdi + libevdi"
             ;;
@@ -97,6 +116,18 @@ check_deps() {
         { warn "libevdi not found — the helper will not build"; missing=1; }
     [ "$missing" = 0 ] && info "Dependencies look complete"
     return 0
+}
+
+# ~/.local/bin is only added to PATH at login on most distributions, and only
+# if it already exists. Installing into a directory we just created therefore
+# gives "uscreen: command not found" straight after a successful install.
+check_path() {
+    case ":${PATH}:" in
+        *":${BIN_DIR}:"*) return 0 ;;
+    esac
+    warn "$BIN_DIR is not in your PATH. Add it with:"
+    warn "    echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
+    warn "or log out and back in — most shells pick it up once the directory exists."
 }
 
 build_if_needed() {
@@ -180,6 +211,7 @@ main() {
     echo ""
     info "Done! Launch 'UScreen' from your app menu (or run: uscreen-gui)"
     info "Install the APK on your tablet, enable USB debugging, plug in — that's it."
+    check_path
 }
 
 main "$@"
