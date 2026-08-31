@@ -12,9 +12,16 @@ use std::path::PathBuf;
 /// `$XDG_RUNTIME_DIR/uscreen`, created 0700. Falls back to `~/.cache/uscreen`
 /// when the session has no runtime dir (a plain SSH login, for instance).
 pub fn runtime_dir() -> PathBuf {
+    // /run/user/<uid> next: the daemon under systemd and a `doctor` run from
+    // an environment-scrubbed shell (sudo, cron) must agree on the path, or
+    // the orphan check looks for a FIFO that is somewhere else.
     let base = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .filter(|p| p.is_dir())
+        .or_else(|| {
+            let p = PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() }));
+            p.is_dir().then_some(p)
+        })
         .unwrap_or_else(|| {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
             PathBuf::from(home).join(".cache")

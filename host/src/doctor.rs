@@ -570,7 +570,11 @@ async fn check_colour(r: &mut Report) {
     }
 }
 
-async fn check_version(r: &mut Report) {
+async fn check_version(r: &mut Report, cfg: &FileConfig) {
+    if !cfg.check_updates {
+        r.line(Level::Ok, "version", &format!("{} (update check disabled)", crate::update::current_version()));
+        return;
+    }
     // One-shot: doctor is its own process and cannot read the daemon's daily
     // result, and ten seconds on the network is fine for a diagnostic.
     let cur = crate::update::current_version();
@@ -696,7 +700,7 @@ pub async fn run() -> Result<()> {
     check_colour(&mut r).await;
 
     section("Configuration");
-    check_version(&mut r).await;
+    check_version(&mut r, &cfg).await;
     check_config(&mut r, &cfg);
 
     println!();

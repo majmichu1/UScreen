@@ -15,7 +15,7 @@ source=("$pkgname-$pkgver.tar.gz::https://github.com/majmichu1/UScreen/archive/r
 sha256sums=('SKIP' 'SKIP')
 
 build() {
-  cd "UScreen-$pkgver/uscreen"
+  cd "UScreen-$pkgver"
   cargo build --release --locked --manifest-path host/Cargo.toml
   cargo build --release --locked --manifest-path gui/Cargo.toml
   # libevdi built from upstream and shipped next to the helper (rpath $ORIGIN),
@@ -26,7 +26,7 @@ build() {
 }
 
 package() {
-  cd "UScreen-$pkgver/uscreen"
+  cd "UScreen-$pkgver"
   install -Dm755 target/release/uscreen     "$pkgdir/usr/bin/uscreen"
   install -Dm755 target/release/uscreen-gui "$pkgdir/usr/bin/uscreen-gui"
   install -Dm755 host/evdi/evdi_helper      "$pkgdir/usr/lib/uscreen/evdi_helper"

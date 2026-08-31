@@ -168,12 +168,16 @@ class TouchCapture {
         // alive with its listener still flipping isConnected. onStart and a
         // token delivered through onNewIntent can both call this.
         if (isConnected) return
+        // A reconnect already scheduled by onClosed would open a second
+        // socket next to this one; this call supersedes it.
+        reconnectJob?.cancel()
         webSocket?.cancel()
         webSocket = null
         connectWebSocket()
     }
 
     private fun connectWebSocket() {
+        webSocket?.cancel()
         val request = Request.Builder()
             .url(WS_URL)
             .build()

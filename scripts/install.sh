@@ -187,9 +187,13 @@ system_setup() {
     # /dev/uinput is root-only on a stock system. Bazzite ships a rule that
     # opens it to the seat user; everyone else needs this one.
     if [ ! -e /etc/udev/rules.d/60-uscreen-uinput.rules ] && [ ! -e /usr/lib/udev/rules.d/60-uscreen-uinput.rules ]; then
-        sudo install -Dm644 "$PROJECT_DIR/packaging/60-uscreen-uinput.rules" /etc/udev/rules.d/60-uscreen-uinput.rules
-        sudo udevadm control --reload 2>/dev/null || true
-        sudo udevadm trigger --name-match=uinput 2>/dev/null || true
+        if [ -f "$PROJECT_DIR/packaging/60-uscreen-uinput.rules" ]; then
+            sudo install -Dm644 "$PROJECT_DIR/packaging/60-uscreen-uinput.rules" /etc/udev/rules.d/60-uscreen-uinput.rules
+            sudo udevadm control --reload 2>/dev/null || true
+            sudo udevadm trigger --name-match=uinput 2>/dev/null || true
+        else
+            warn "packaging/60-uscreen-uinput.rules not found — /dev/uinput may stay root-only"
+        fi
     fi
 
     # initial_device_count is only read when the module loads, so writing the

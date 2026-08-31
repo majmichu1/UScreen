@@ -202,12 +202,15 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     // launched; anything connecting to the loopback ports without it gets
     // nothing. See config::FileConfig::require_token.
     let token: Option<String> = if file_cfg.require_token {
+        // Fail closed. Running without a token because the runtime dir was
+        // unwritable would quietly turn a required check into no check.
         match runtime::new_session_token() {
             Ok(t) => Some(t),
-            Err(e) => {
-                warn!("Could not create a session token ({}); running without one", e);
-                None
-            }
+            Err(e) => anyhow::bail!(
+                "require_token is on but no session token could be created: {}. \
+                 Fix the runtime directory, or set require_token = false.",
+                e
+            ),
         }
     } else {
         warn!("require_token = false: any local process can read the screen and inject input");
@@ -554,6 +557,12 @@ async fn adb_monitor(
 ) {
     let mut current: Option<String> = None;
     let mut last_relaunch = std::time::Instant::now() - std::time::Duration::from_secs(60);
+    // How many times the token has been re-delivered to this tablet. An app
+    // too old to send one fails auth on every reconnect, and without a cap
+    // that is an `am start` every five seconds for as long as it stays
+    // plugged in. Reset whenever a tablet (re)connects.
+    let mut relaunches: u32 = 0;
+    const MAX_RELAUNCHES: u32 = 3;
 
     // Without adb nothing below can ever succeed, and a loop that polls a
     // missing binary every two seconds in silence looks exactly like a
@@ -577,6 +586,7 @@ async fn adb_monitor(
                 on_tablet_connected(serial, video_port, input_port, auto_launch, token.as_deref()).await;
                 let _ = tablet_tx.send(true);
                 current = found;
+                relaunches = 0;
             }
             (Some(old), Some(serial)) if old != serial => {
                 // Usually not a different tablet at all: pulling the cable on a
@@ -596,6 +606,7 @@ async fn adb_monitor(
                 on_tablet_connected(serial, video_port, input_port, auto_launch, token.as_deref()).await;
                 let _ = tablet_tx.send(true);
                 current = found;
+                relaunches = 0;
             }
             (Some(old), None) => {
                 info!("Tablet disconnected ({})", old);
@@ -613,9 +624,19 @@ async fn adb_monitor(
             _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {}
             _ = relaunch.notified() => {
                 if let Some(serial) = current.as_deref() {
-                    if last_relaunch.elapsed() >= std::time::Duration::from_secs(5) {
+                    if relaunches >= MAX_RELAUNCHES {
+                        if relaunches == MAX_RELAUNCHES {
+                            relaunches += 1;
+                            warn!(
+                                "A client keeps connecting without a valid token and relaunching \
+                                 the app has not helped. Update the UScreen app on the tablet \
+                                 (1.1.0 or newer); giving up until it is reconnected."
+                            );
+                        }
+                    } else if last_relaunch.elapsed() >= std::time::Duration::from_secs(5) {
                         last_relaunch = std::time::Instant::now();
-                        info!("Delivering the session token to the app");
+                        relaunches += 1;
+                        info!("Delivering the session token to the app ({}/{})", relaunches, MAX_RELAUNCHES);
                         launch_app(serial, token.as_deref()).await;
                     }
                 }
