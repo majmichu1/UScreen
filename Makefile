@@ -82,6 +82,12 @@ stop:
 
 # Release tarball: prebuilt binaries + installer. Upload to GitHub releases
 # together with the release APK (android/app/build/outputs/apk/release/).
+# Publish a complete release: builds everything, refuses if any of the five
+# files is missing, then creates the GitHub release and uploads them all.
+# Usage: GH_TOKEN=... make publish NOTES=path/to/notes.md
+publish:
+	./scripts/publish-release.sh $(NOTES)
+
 dist:
 	@# Portable binaries (built against Debian 12 glibc) when the build
 	@# container exists; otherwise a local build, which only runs on
