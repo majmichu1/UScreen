@@ -1,0 +1,5 @@
+# Let the user at the seat open /dev/uinput, which uscreen needs to turn the
+# tablet's touch and pen into input events. Stock kernels create it root:root
+# 0600. uaccess hands it to whoever is logged in at the console, the same way
+# the desktop gets the keyboard and the DRM cards - no group membership needed.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

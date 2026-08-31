@@ -24,6 +24,7 @@ distrobox enter "${USCREEN_BUILD_CONTAINER:-uscreen-build}" -- bash -lc '
   install -Dm644 packaging/uscreen.service $R/usr/lib/systemd/user/uscreen.service
   install -Dm644 packaging/uscreen-evdi.conf    $R/usr/lib/modprobe.d/uscreen-evdi.conf
   install -Dm644 packaging/uscreen-modules.conf $R/usr/lib/modules-load.d/uscreen.conf
+  install -Dm644 packaging/60-uscreen-uinput.rules $R/usr/lib/udev/rules.d/60-uscreen-uinput.rules
   mkdir -p $R/DEBIAN
   sed "s/^Version: .*/Version: $V/" packaging/deb/control > $R/DEBIAN/control
   install -m755 packaging/deb/postinst $R/DEBIAN/postinst
@@ -35,7 +36,7 @@ distrobox enter "${USCREEN_BUILD_CONTAINER:-uscreen-build}" -- bash -lc '
   cp dist/uscreen-$V-linux-x86_64.tar.gz $RB/SOURCES/
   sed "s/^Version:.*/Version:        $V/" packaging/rpm/uscreen.spec > $RB/SPECS/uscreen.spec
   rpmbuild --define "_topdir $RB" --define "_userunitdir /usr/lib/systemd/user" --define "_libdir /usr/lib64" \
-           --define "_modprobedir /usr/lib/modprobe.d" --define "_modulesloaddir /usr/lib/modules-load.d" \
+           --define "_modprobedir /usr/lib/modprobe.d" --define "_modulesloaddir /usr/lib/modules-load.d" --define "_udevrulesdir /usr/lib/udev/rules.d" \
            -bb $RB/SPECS/uscreen.spec 2>&1 | grep -E "Wrote|error" 
   cp $RB/RPMS/x86_64/uscreen-$V-*.rpm dist/
 '

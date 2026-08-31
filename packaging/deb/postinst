@@ -10,5 +10,7 @@ if [ "$1" = "configure" ]; then
         modprobe evdi 2>/dev/null || true
     fi
     modprobe uinput 2>/dev/null || true
+    udevadm control --reload 2>/dev/null || true
+    udevadm trigger --name-match=uinput 2>/dev/null || true
     echo "uscreen: enable at login with:  systemctl --user enable --now uscreen"
 fi

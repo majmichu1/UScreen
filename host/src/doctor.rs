@@ -132,7 +132,7 @@ fn check_modules(r: &mut Report) {
             Ok(_) => r.line(Level::Ok, "uinput device", "writable"),
             Err(e) => {
                 r.line(Level::Fail, "uinput device", &format!("not writable: {}", e));
-                r.hint("add a udev rule granting your user access to /dev/uinput");
+                r.hint("sudo install -Dm644 packaging/60-uscreen-uinput.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger --name-match=uinput");
             }
         }
     }

@@ -36,5 +36,6 @@ package() {
   install -Dm644 packaging/uscreen.service  "$pkgdir/usr/lib/systemd/user/uscreen.service"
   install -Dm644 packaging/uscreen-evdi.conf "$pkgdir/usr/lib/modprobe.d/uscreen-evdi.conf"
   install -Dm644 packaging/uscreen-modules.conf "$pkgdir/usr/lib/modules-load.d/uscreen.conf"
+  install -Dm644 packaging/60-uscreen-uinput.rules "$pkgdir/usr/lib/udev/rules.d/60-uscreen-uinput.rules"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE" 2>/dev/null || true
 }

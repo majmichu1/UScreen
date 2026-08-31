@@ -188,20 +188,25 @@ fn poll_status() -> Status {
         }
     }
 
-    if let Ok(out) = Command::new("adb").arg("get-state").output() {
-        s.tablet_connected = String::from_utf8_lossy(&out.stdout).trim() == "device";
-    }
-    if s.tablet_connected {
-        if let Ok(out) = Command::new("adb").args(["devices", "-l"]).output() {
-            let text = String::from_utf8_lossy(&out.stdout);
-            for line in text.lines().skip(1) {
-                if let Some(model) = line
-                    .split_whitespace()
-                    .find_map(|tok| tok.strip_prefix("model:"))
-                {
-                    s.tablet_model = model.replace('_', " ");
-                    break;
-                }
+    // Not `adb get-state`: it fails outright as soon as two devices are
+    // reachable, which is the normal state with `adb tcpip` in use - the
+    // window would have said "no tablet" while the daemon was streaming.
+    if let Ok(out) = Command::new("adb").args(["devices", "-l"]).output() {
+        let text = String::from_utf8_lossy(&out.stdout);
+        let ready: Vec<&str> = text
+            .lines()
+            .skip(1)
+            .filter(|l| l.split_whitespace().nth(1) == Some("device"))
+            .collect();
+        // Prefer the USB entry (no colon in the serial), like the daemon does.
+        if let Some(line) = ready
+            .iter()
+            .find(|l| !l.split_whitespace().next().unwrap_or("").contains(':'))
+            .or(ready.first())
+        {
+            s.tablet_connected = true;
+            if let Some(model) = line.split_whitespace().find_map(|t| t.strip_prefix("model:")) {
+                s.tablet_model = model.replace('_', " ");
             }
         }
     }

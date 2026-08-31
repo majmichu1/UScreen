@@ -470,9 +470,16 @@ Actions: 0=DOWN, 1=UP, 2=MOVE. Coordinates are normalized (0.0-1.0).
 ## Troubleshooting
 
 ### "Failed to open /dev/uinput"
+
+On a stock system `/dev/uinput` is root-only. The installer and the packages
+put a udev rule in place that opens it to the logged-in user (`TAG+="uaccess"`,
+the same mechanism the desktop uses for the keyboard). If you installed some
+other way:
+
 ```bash
 sudo modprobe uinput
-# For permanent: echo uinput | sudo tee /etc/modules-load.d/uinput.conf
+sudo install -Dm644 packaging/60-uscreen-uinput.rules /etc/udev/rules.d/60-uscreen-uinput.rules
+sudo udevadm control --reload && sudo udevadm trigger --name-match=uinput
 ```
 
 ### "EVDI device did not appear"

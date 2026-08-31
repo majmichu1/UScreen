@@ -175,6 +175,13 @@ system_setup() {
     echo "options evdi initial_device_count=1" | sudo tee /etc/modprobe.d/uscreen-evdi.conf >/dev/null
     printf "evdi\nuinput\n" | sudo tee /etc/modules-load.d/uscreen.conf >/dev/null
     sudo modprobe uinput 2>/dev/null || true
+    # /dev/uinput is root-only on a stock system. Bazzite ships a rule that
+    # opens it to the seat user; everyone else needs this one.
+    if [ ! -e /etc/udev/rules.d/60-uscreen-uinput.rules ] && [ ! -e /usr/lib/udev/rules.d/60-uscreen-uinput.rules ]; then
+        sudo install -Dm644 "$PROJECT_DIR/packaging/60-uscreen-uinput.rules" /etc/udev/rules.d/60-uscreen-uinput.rules
+        sudo udevadm control --reload 2>/dev/null || true
+        sudo udevadm trigger --name-match=uinput 2>/dev/null || true
+    fi
 
     # initial_device_count is only read when the module loads, so writing the
     # modprobe.d file does nothing to a module that is already resident. That

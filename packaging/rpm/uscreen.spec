@@ -32,6 +32,8 @@ install -Dm644 scripts/uscreen.desktop %{buildroot}%{_datadir}/applications/uscr
 install -Dm644 packaging/uscreen.service %{buildroot}%{_userunitdir}/uscreen.service
 install -Dm644 packaging/uscreen-evdi.conf    %{buildroot}%{_modprobedir}/uscreen-evdi.conf
 install -Dm644 packaging/uscreen-modules.conf %{buildroot}%{_modulesloaddir}/uscreen.conf
+%{_udevrulesdir}/60-uscreen-uinput.rules
+install -Dm644 packaging/60-uscreen-uinput.rules %{buildroot}%{_udevrulesdir}/60-uscreen-uinput.rules
 
 %post
 # initial_device_count is only read when evdi loads. Reload it so a device
@@ -43,6 +45,8 @@ else
     modprobe evdi 2>/dev/null || true
 fi
 modprobe uinput 2>/dev/null || true
+udevadm control --reload 2>/dev/null || true
+udevadm trigger --name-match=uinput 2>/dev/null || true
 
 %files
 %{_bindir}/uscreen
