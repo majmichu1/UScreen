@@ -158,7 +158,15 @@ fn open_release_page() {
 /// Best effort: a missing GUI binary is worth a log line, not a crash in the
 /// middle of a menu callback.
 fn open_settings() {
-    match std::process::Command::new("uscreen-gui").spawn() {
+    // Next to this binary first. Under systemd --user the PATH usually lacks
+    // ~/.local/bin, where install.sh puts both binaries, so a bare name would
+    // fail for exactly the installs that start the daemon at login.
+    let sibling = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("uscreen-gui")))
+        .filter(|p| p.exists());
+    let program = sibling.unwrap_or_else(|| std::path::PathBuf::from("uscreen-gui"));
+    match std::process::Command::new(&program).spawn() {
         Ok(_) => info!("Opened settings from the tray"),
         Err(e) => warn!("Could not launch uscreen-gui: {}", e),
     }

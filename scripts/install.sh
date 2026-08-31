@@ -163,7 +163,10 @@ install_files() {
     chmod +x "$BIN_DIR/uscreen" "$BIN_DIR/evdi_helper"
     info "Binaries installed to $BIN_DIR"
 
-    cp "$SCRIPT_DIR/uscreen.desktop" "$APP_DIR/" && info "Desktop entry installed (UScreen in the app menu)"
+    # Absolute path: the app menu does not necessarily have ~/.local/bin on
+    # its PATH, so a bare "uscreen-gui" can be a menu entry that does nothing.
+    sed "s|^Exec=.*|Exec=$BIN_DIR/uscreen-gui|" "$SCRIPT_DIR/uscreen.desktop" > "$APP_DIR/uscreen.desktop" \
+        && info "Desktop entry installed (UScreen in the app menu)"
 
     mkdir -p "${HOME}/.config/systemd/user"
     cp "$SCRIPT_DIR/uscreen.service" "${HOME}/.config/systemd/user/" 2>/dev/null || true
