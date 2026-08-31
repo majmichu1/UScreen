@@ -48,4 +48,13 @@ class Prefs(context: Context) {
     var hasUserSettings: Boolean
         get() = sp.getBoolean("has_user_settings", false)
         set(v) = sp.edit().putBoolean("has_user_settings", v).apply()
+
+    /**
+     * The daemon's session token, delivered as an intent extra when it
+     * launches the app over adb. Kept so a relaunch by hand within the same
+     * daemon run still authenticates; a new daemon run hands out a new one.
+     */
+    var hostToken: String?
+        get() = sp.getString("host_token", null)
+        set(v) = sp.edit().putString("host_token", v).apply()
 }

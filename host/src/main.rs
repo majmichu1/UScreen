@@ -7,8 +7,10 @@ mod encoder;
 mod input;
 mod latency;
 mod osk;
+mod runtime;
 mod stream;
 mod tray;
+mod update;
 mod vdisplay;
 
 use anyhow::Result;
@@ -196,10 +198,28 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         ten_bit: file_cfg.ten_bit,
     };
 
-    let stream_config = stream::StreamConfig { video_port };
+    // One secret per daemon run. Handed to the app over adb when it is
+    // launched; anything connecting to the loopback ports without it gets
+    // nothing. See config::FileConfig::require_token.
+    let token: Option<String> = if file_cfg.require_token {
+        match runtime::new_session_token() {
+            Ok(t) => Some(t),
+            Err(e) => {
+                warn!("Could not create a session token ({}); running without one", e);
+                None
+            }
+        }
+    } else {
+        warn!("require_token = false: any local process can read the screen and inject input");
+        None
+    };
+    let relaunch = std::sync::Arc::new(tokio::sync::Notify::new());
+
+    let stream_config = stream::StreamConfig { video_port, token: token.clone() };
 
     let input_config = input::InputConfig {
         port: input_port,
+        token: token.clone(),
         codec: capture::Codec::from_encoder(&encoder).muxer().to_string(),
         virtual_width: width,
         virtual_height: height,
@@ -234,6 +254,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         Some(settings_tx.clone()),
         mode_tx.clone(),
         latency,
+        relaunch.clone(),
     );
 
     // Deliberately shallow. This ring is pure latency when it fills: 256 frames
@@ -371,17 +392,27 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     // The daemon's only face on the desktop. It follows the same channels the
     // rest of the daemon does, so it cannot drift out of step with what is
     // actually running.
+    // Once a day, ask GitHub whether there is a newer release. Reported in
+    // the tray and by doctor; never installed from here.
+    let (update_tx, update_rx) = watch::channel::<update::Available>(None);
+    let update_handle = if file_cfg.check_updates {
+        Some(tokio::spawn(async move { update::run(update_tx).await }))
+    } else {
+        None
+    };
+
     let tray_mode_tx = mode_tx.clone();
     let tray_shutdown_tx = shutdown_tx.clone();
     let tray_handle = tokio::spawn(async move {
-        tray::run(tray_mode_tx, tray_tablet_rx, tray_shutdown_tx).await;
+        tray::run(tray_mode_tx, tray_tablet_rx, tray_shutdown_tx, update_rx).await;
     });
 
     // Plug-and-play: watch for the tablet over ADB, set up port forwarding
     // and launch the app whenever it's (re)connected.
     let auto_launch = file_cfg.auto_launch_app;
+    let adb_token = token.clone();
     let adb_handle = tokio::spawn(async move {
-        adb_monitor(video_port, input_port, auto_launch, tablet_tx).await;
+        adb_monitor(video_port, input_port, auto_launch, tablet_tx, adb_token, relaunch).await;
     });
 
     println!();
@@ -431,6 +462,9 @@ async fn run_daemon(cli: Cli) -> Result<()> {
     save_handle.abort();
     mode_save_handle.abort();
     tray_handle.abort();
+    if let Some(h) = update_handle {
+        h.abort();
+    }
 
     // Clean up PID file
     let _ = std::fs::remove_file(&pid_path);
@@ -459,9 +493,21 @@ fn find_helper(path: &PathBuf) -> PathBuf {
         return path.clone();
     }
 
-    let installed = PathBuf::from(format!("{}/.local/bin/evdi_helper", home));
-    if installed.exists() {
-        return installed;
+    // Wherever an installer may have put it: the per-user install script,
+    // then the locations a system package uses. Checked before the source
+    // tree so a packaged install never picks up a stale checkout.
+    let candidates = [
+        format!("{}/.local/bin/evdi_helper", home),
+        "/usr/lib/uscreen/evdi_helper".to_string(),
+        "/usr/lib64/uscreen/evdi_helper".to_string(),
+        "/usr/libexec/uscreen/evdi_helper".to_string(),
+        "/usr/local/lib/uscreen/evdi_helper".to_string(),
+    ];
+    for c in candidates {
+        let p = PathBuf::from(c);
+        if p.exists() {
+            return p;
+        }
     }
 
     let alt = PathBuf::from("host/evdi/evdi_helper");
@@ -503,8 +549,11 @@ async fn adb_monitor(
     input_port: u16,
     auto_launch: bool,
     tablet_tx: watch::Sender<bool>,
+    token: Option<String>,
+    relaunch: std::sync::Arc<tokio::sync::Notify>,
 ) {
     let mut current: Option<String> = None;
+    let mut last_relaunch = std::time::Instant::now() - std::time::Duration::from_secs(60);
 
     loop {
         let found = adb_device_serial().await;
@@ -518,7 +567,7 @@ async fn adb_monitor(
                     serial
                 );
                 announce_transport(serial);
-                on_tablet_connected(serial, video_port, input_port, auto_launch).await;
+                on_tablet_connected(serial, video_port, input_port, auto_launch, token.as_deref()).await;
                 let _ = tablet_tx.send(true);
                 current = found;
             }
@@ -537,7 +586,7 @@ async fn adb_monitor(
                     info!("Different tablet connected ({} → {})", old, serial);
                 }
                 announce_transport(serial);
-                on_tablet_connected(serial, video_port, input_port, auto_launch).await;
+                on_tablet_connected(serial, video_port, input_port, auto_launch, token.as_deref()).await;
                 let _ = tablet_tx.send(true);
                 current = found;
             }
@@ -549,7 +598,22 @@ async fn adb_monitor(
             _ => {}
         }
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        // Poll every two seconds, but wake at once if a client turned up
+        // without the token: the app was started by hand, and launching it
+        // again over adb is how it gets one. Rate-limited so a misbehaving
+        // client cannot make us hammer adb.
+        tokio::select! {
+            _ = tokio::time::sleep(tokio::time::Duration::from_secs(2)) => {}
+            _ = relaunch.notified() => {
+                if let Some(serial) = current.as_deref() {
+                    if last_relaunch.elapsed() >= std::time::Duration::from_secs(5) {
+                        last_relaunch = std::time::Instant::now();
+                        info!("Delivering the session token to the app");
+                        launch_app(serial, token.as_deref()).await;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -568,30 +632,34 @@ async fn on_tablet_connected(
     video_port: u16,
     input_port: u16,
     auto_launch: bool,
+    token: Option<&str>,
 ) {
     match setup_adb_forwarding(serial, video_port, input_port).await {
         Ok(_) => {
             info!("ADB port forwarding set up ({}, {})", video_port, input_port);
             if auto_launch {
-                let r = tokio::process::Command::new("adb")
-                    .args([
-                        "-s",
-                        serial,
-                        "shell",
-                        "am",
-                        "start",
-                        "-n",
-                        "com.uscreen/.MainActivity",
-                    ])
-                    .output()
-                    .await;
-                match r {
-                    Ok(o) if o.status.success() => info!("UScreen app launched on tablet"),
-                    _ => warn!("Could not auto-launch the app (is it installed?)"),
-                }
+                launch_app(serial, token).await;
             }
         }
         Err(e) => warn!("ADB forwarding failed: {}", e),
+    }
+}
+
+/// Start (or re-front) the app, handing it the session token as an intent
+/// extra. The activity is singleTask, so a running app receives it through
+/// onNewIntent rather than being restarted.
+async fn launch_app(serial: &str, token: Option<&str>) {
+    let mut args: Vec<String> = vec![
+        "-s".into(), serial.into(), "shell".into(), "am".into(), "start".into(),
+        "-n".into(), "com.uscreen/.MainActivity".into(),
+    ];
+    if let Some(t) = token {
+        args.extend(["--es".into(), "token".into(), t.into()]);
+    }
+    let r = tokio::process::Command::new("adb").args(&args).output().await;
+    match r {
+        Ok(o) if o.status.success() => info!("UScreen app launched on tablet"),
+        _ => warn!("Could not launch the app (is it installed?)"),
     }
 }
 

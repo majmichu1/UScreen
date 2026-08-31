@@ -22,6 +22,8 @@ const ICON_TABLET: &str = "input-tablet";
 struct UScreenTray {
     pen_only: bool,
     tablet_present: bool,
+    /// Newer release, when the daily check found one.
+    update: Option<String>,
     mode_tx: watch::Sender<bool>,
     shutdown_tx: watch::Sender<bool>,
 }
@@ -62,10 +64,14 @@ impl Tray for UScreenTray {
     }
 
     fn tool_tip(&self) -> ToolTip {
+        let mut description = self.state_line();
+        if let Some(v) = &self.update {
+            description.push_str(&format!("\nUpdate available: {}", v));
+        }
         ToolTip {
             icon_name: self.icon_name(),
             title: "UScreen".into(),
-            description: self.state_line(),
+            description,
             ..Default::default()
         }
     }
@@ -77,13 +83,26 @@ impl Tray for UScreenTray {
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        vec![
+        let mut items: Vec<MenuItem<Self>> = vec![
             StandardItem {
                 label: self.state_line(),
                 enabled: false,
                 ..Default::default()
             }
             .into(),
+        ];
+        if let Some(v) = &self.update {
+            items.push(
+                StandardItem {
+                    label: format!("Update available: {} — open release page", v),
+                    icon_name: "system-software-update".into(),
+                    activate: Box::new(|_: &mut Self| open_release_page()),
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+        items.extend([
             MenuItem::Separator,
             CheckmarkItem {
                 label: "Graphics tablet".into(),
@@ -121,7 +140,18 @@ impl Tray for UScreenTray {
                 ..Default::default()
             }
             .into(),
-        ]
+        ]);
+        items
+    }
+}
+
+fn open_release_page() {
+    match std::process::Command::new("xdg-open")
+        .arg(crate::update::RELEASES_PAGE)
+        .spawn()
+    {
+        Ok(_) => info!("Opened the release page"),
+        Err(e) => warn!("Could not open {}: {}", crate::update::RELEASES_PAGE, e),
     }
 }
 
@@ -142,12 +172,14 @@ pub async fn run(
     mode_tx: watch::Sender<bool>,
     mut tablet_rx: watch::Receiver<bool>,
     shutdown_tx: watch::Sender<bool>,
+    mut update_rx: watch::Receiver<crate::update::Available>,
 ) {
     let mut mode_rx = mode_tx.subscribe();
 
     let tray = UScreenTray {
         pen_only: *mode_rx.borrow_and_update(),
         tablet_present: *tablet_rx.borrow_and_update(),
+        update: update_rx.borrow_and_update().clone(),
         mode_tx,
         shutdown_tx,
     };
@@ -177,6 +209,11 @@ pub async fn run(
                 if r.is_err() { break; }
                 let present = *tablet_rx.borrow();
                 handle.update(move |t: &mut UScreenTray| t.tablet_present = present).await;
+            }
+            r = update_rx.changed() => {
+                if r.is_err() { break; }
+                let v = update_rx.borrow().clone();
+                handle.update(move |t: &mut UScreenTray| t.update = v).await;
             }
         }
     }

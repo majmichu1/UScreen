@@ -544,7 +544,9 @@ static void on_cursor_move(struct evdi_cursor_move cursor_move, void *user_data)
 /* (Re)open the capture FIFO without blocking forever: O_NONBLOCK open fails
    with ENXIO while no reader (ffmpeg) has the other end open. */
 static int try_open_fifo(void) {
-    int fd = open(g_fifo_path, O_WRONLY | O_NONBLOCK);
+    /* O_NOFOLLOW: the path is in a private directory now, but a symlink
+       planted there must still never redirect the screen into a file. */
+    int fd = open(g_fifo_path, O_WRONLY | O_NONBLOCK | O_NOFOLLOW);
     if (fd < 0)
         return -1;
     /* Switch back to blocking writes once connected */

@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
-use tokio_tungstenite::accept_async;
+use tokio_tungstenite::{accept_async_with_config, tungstenite::protocol::WebSocketConfig};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{error, info, warn};
 
@@ -150,6 +150,10 @@ pub enum InputEvent {
     /// the other output and brings the virtual display up or down to match.
     #[serde(rename = "mode")]
     Mode { pen_only: bool },
+    /// Must be the first message on the socket. Proves the client is the
+    /// tablet this daemon launched, not some other process on the loopback.
+    #[serde(rename = "auth")]
+    Auth { token: String },
     /// The tablet has this frame on screen. Closes the latency measurement
     /// loop — the host timed the frame out, so the round trip needs no clock
     /// agreement between the two devices.
@@ -181,6 +185,8 @@ pub struct InputResponse {
 #[derive(Clone)]
 pub struct InputConfig {
     pub port: u16,
+    /// Session token the client must present first; `None` disables it.
+    pub token: Option<String>,
     /// Bitstream the encoder produces, so connecting clients can be told.
     pub codec: String,
     pub virtual_width: u32,
@@ -191,6 +197,7 @@ impl Default for InputConfig {
     fn default() -> Self {
         Self {
             port: 8891,
+            token: None,
             codec: "h264".into(),
             virtual_width: 2960,
             virtual_height: 1848,
@@ -773,6 +780,10 @@ pub struct InputServer {
     /// and several parts of the daemon have to follow it.
     mode_tx: watch::Sender<bool>,
     latency: crate::latency::LatencyTracker,
+    /// Woken when a client fails to authenticate, so the daemon can push the
+    /// token to the app again over adb (a manually launched app never got
+    /// one).
+    relaunch: Arc<tokio::sync::Notify>,
 }
 
 impl InputServer {
@@ -781,6 +792,7 @@ impl InputServer {
         settings_tx: Option<watch::Sender<EncoderSettings>>,
         mode_tx: watch::Sender<bool>,
         latency: crate::latency::LatencyTracker,
+        relaunch: Arc<tokio::sync::Notify>,
     ) -> Self {
         Self {
             config,
@@ -788,6 +800,7 @@ impl InputServer {
             settings_tx,
             mode_tx,
             latency,
+            relaunch,
         }
     }
 
@@ -911,9 +924,11 @@ impl InputServer {
             let mode_tx = self.mode_tx.clone();
             let latency = self.latency.clone();
             let devices = uinput.clone();
+            let relaunch = self.relaunch.clone();
             tokio::spawn(async move {
                 if let Err(e) =
-                    handle_connection(socket, cfg, settings, mode_tx, latency, devices).await
+                    handle_connection(socket, cfg, settings, mode_tx, latency, devices, relaunch)
+                        .await
                 {
                     warn!("Input handler {}: {}", peer, e);
                 }
@@ -938,13 +953,42 @@ async fn handle_connection(
     mode_tx: watch::Sender<bool>,
     latency: crate::latency::LatencyTracker,
     uinput: Arc<std::sync::Mutex<InjectDevices>>,
+    relaunch: Arc<tokio::sync::Notify>,
 ) -> Result<()> {
-    let ws_stream = accept_async(raw_stream)
+    // Input events are a few hundred bytes. The library default of 64 MiB
+    // per message is a memory bill nobody on this socket should be able to
+    // run up.
+    let ws_cfg = WebSocketConfig {
+        max_message_size: Some(64 * 1024),
+        max_frame_size: Some(64 * 1024),
+        ..Default::default()
+    };
+    let ws_stream = accept_async_with_config(raw_stream, Some(ws_cfg))
         .await
         .context("WebSocket handshake failed")?;
 
     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
     let mut mode_rx = mode_tx.subscribe();
+
+    // Authenticate before anything else happens: no greeting, no events.
+    if let Some(expected) = config.token.as_deref() {
+        let first = tokio::time::timeout(std::time::Duration::from_secs(3), ws_receiver.next()).await;
+        let ok = match first {
+            Ok(Some(Ok(Message::Text(text)))) => matches!(
+                serde_json::from_str::<InputEvent>(&text),
+                Ok(InputEvent::Auth { token }) if crate::runtime::token_matches(expected, &token)
+            ),
+            _ => false,
+        };
+        if !ok {
+            warn!("Input client did not authenticate — dropped. Re-sending the token to the app.");
+            // Most likely the app was started by hand and never received a
+            // token. Launching it again over adb delivers one.
+            relaunch.notify_one();
+            let _ = ws_sender.send(Message::Close(None)).await;
+            return Ok(());
+        }
+    }
 
     let resp = InputResponse {
         status: "connected".to_string(),
@@ -1230,6 +1274,9 @@ fn handle_event(
                 let _ = tx.send(new);
             }
         }
+
+        // Already consumed by handle_connection; a second one is harmless.
+        InputEvent::Auth { .. } => {}
 
         InputEvent::Mode { pen_only } => {
             // Only publish a real change. A watch send always wakes every

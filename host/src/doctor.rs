@@ -7,7 +7,7 @@
 //! shared capture FIFO interleave at pipe granularity, and no amount of
 //! restarting the daemon fixes it until they are killed.
 
-use crate::capture::FIFO_PATH;
+use crate::capture::fifo_path;
 use crate::config::{self, FileConfig, MAX_BITRATE_KBPS, MAX_FPS};
 use crate::vdisplay;
 use anyhow::Result;
@@ -178,7 +178,7 @@ async fn check_tools(r: &mut Report, cfg: &FileConfig) {
 async fn check_processes(r: &mut Report) {
     let daemons = pids_exact("uscreen").await;
     let helpers = pids_exact("evdi_helper").await;
-    let encoders = pids_full(&format!("ffmpeg.*{}", FIFO_PATH)).await;
+    let encoders = pids_full(&format!("ffmpeg.*{}", fifo_path())).await;
 
     // The PID file is the daemon's single slot; anything running beside it is
     // untracked and `uscreen stop` will never reach it.
@@ -242,7 +242,7 @@ async fn check_processes(r: &mut Report) {
         r.hint("two readers on one pipe corrupt frames — kill the strays");
     } else if encoders.len() == 1 && tracked.is_none() {
         r.line(Level::Fail, "ffmpeg on capture FIFO", "orphaned");
-        r.hint(&format!("pkill -f 'ffmpeg.*{}'", FIFO_PATH));
+        r.hint(&format!("pkill -f 'ffmpeg.*{}'", &fifo_path()));
     } else {
         r.line(
             Level::Ok,
@@ -570,6 +570,24 @@ async fn check_colour(r: &mut Report) {
     }
 }
 
+async fn check_version(r: &mut Report) {
+    // One-shot: doctor is its own process and cannot read the daemon's daily
+    // result, and ten seconds on the network is fine for a diagnostic.
+    let cur = crate::update::current_version();
+    match crate::update::latest_release_tag().await {
+        Some(tag) => {
+            let latest = tag.trim_start_matches('v').to_string();
+            if crate::update::is_newer(&latest, cur) {
+                r.line(Level::Warn, "version", &format!("{} — {} is available", cur, latest));
+                r.hint(crate::update::RELEASES_PAGE);
+            } else {
+                r.line(Level::Ok, "version", &format!("{} (latest)", cur));
+            }
+        }
+        None => r.line(Level::Ok, "version", &format!("{} (could not check for updates)", cur)),
+    }
+}
+
 fn check_config(r: &mut Report, cfg: &FileConfig) {
     let path = config::config_path();
     // `cfg` has already been clamped, so compare against the raw file too: a
@@ -678,6 +696,7 @@ pub async fn run() -> Result<()> {
     check_colour(&mut r).await;
 
     section("Configuration");
+    check_version(&mut r).await;
     check_config(&mut r, &cfg);
 
     println!();

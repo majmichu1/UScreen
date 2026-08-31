@@ -66,6 +66,10 @@ class VideoReceiver {
     /// codec they are, so guessing wrong means a decoder that never outputs.
     @Volatile var mimeType: String = MIME_TYPE
 
+    /// Session token; written as the first 64 bytes on the socket. The host
+    /// sends nothing until it has seen it.
+    @Volatile var token: String? = null
+
     private var frameCallbackThread: HandlerThread? = null
     private val renderedCount = AtomicLong(0)
 
@@ -356,6 +360,12 @@ class VideoReceiver {
                     receiveBufferSize = 128 * 1024
                 }
                 inputStream = socket?.getInputStream()
+                token?.let { t ->
+                    socket?.getOutputStream()?.apply {
+                        write(t.toByteArray(Charsets.US_ASCII))
+                        flush()
+                    }
+                }
                 Log.i(TAG, "Connected to video stream")
 
                 val sizeHeader = ByteArray(4)

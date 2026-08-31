@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
         prefs = Prefs(this)
         videoReceiver = VideoReceiver()
         touchCapture = TouchCapture()
+        applyToken(intent, restart = false)
 
         // Close the host's latency measurement loop: every acknowledged frame
         // lets the host time capture→display on its own clock.
@@ -219,6 +220,35 @@ class MainActivity : ComponentActivity() {
      * cannot steal taps from the settings button the way intercepting touch
      * would.
      */
+    /**
+     * The daemon launches us with `am start --es token <hex>`; because the
+     * activity is singleTask, a running app receives that here rather than
+     * being recreated. A changed token means a new daemon run, so both
+     * connections are torn down and rebuilt with it.
+     */
+    override fun onNewIntent(intent: android.content.Intent?) {
+        super.onNewIntent(intent)
+        intent?.let { applyToken(it, restart = true) }
+    }
+
+    private fun applyToken(intent: android.content.Intent, restart: Boolean) {
+        val fromIntent = intent.getStringExtra("token")
+        if (fromIntent != null) prefs.hostToken = fromIntent
+        val token = prefs.hostToken ?: return
+        val changed = touchCapture?.token != token
+        touchCapture?.token = token
+        videoReceiver?.token = token
+        if (restart && changed) {
+            Log.i("UScreen", "New session token — reconnecting")
+            touchCapture?.disconnect()
+            touchCapture?.connect()
+            if (!penOnlyMode) {
+                videoReceiver?.stop()
+                videoReceiver?.start()
+            }
+        }
+    }
+
     override fun onGenericMotionEvent(event: android.view.MotionEvent): Boolean {
         val w = window.decorView.width
         val h = window.decorView.height
@@ -299,6 +329,21 @@ fun UScreenMain(
     var mbps by remember { mutableStateOf(0f) }
     var showOverlay by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
+    var updateAvailable by remember { mutableStateOf<String?>(null) }
+    val ctx = LocalContext.current
+    // Checked when the sheet opens, not on every launch: one request, and
+    // only when the user is already looking at settings.
+    LaunchedEffect(showSettings) {
+        if (showSettings && updateAvailable == null) {
+            val cur = try {
+                ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "0"
+            } catch (_: Exception) { "0" }
+            val found = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                UpdateCheck.newerThan(cur)
+            }
+            if (found != null) updateAvailable = found
+        }
+    }
     var showStats by remember { mutableStateOf(prefs?.showStats ?: false) }
 
     val context = LocalContext.current
@@ -419,6 +464,15 @@ fun UScreenMain(
         if (showSettings) {
             SettingsSheet(
                 prefs = prefs,
+                updateAvailable = updateAvailable,
+                onOpenUpdate = {
+                    context.startActivity(
+                        android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(UpdateCheck.RELEASES_PAGE)
+                        )
+                    )
+                },
                 penOnly = penOnly,
                 onPenOnlyChange = { wantPenOnly ->
                     // Fire and forget: the host answers with the mode it
@@ -542,6 +596,8 @@ private fun ConnectionScreen() {
 @Composable
 private fun SettingsSheet(
     prefs: Prefs?,
+    updateAvailable: String?,
+    onOpenUpdate: () -> Unit,
     penOnly: Boolean,
     onPenOnlyChange: (Boolean) -> Unit,
     showStats: Boolean,
@@ -566,6 +622,28 @@ private fun SettingsSheet(
                 color = Color.White
             )
             Spacer(Modifier.height(20.dp))
+
+            if (updateAvailable != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0x3350507A))
+                        .clickable { onOpenUpdate() }
+                        .padding(12.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Update available: $updateAvailable", fontSize = 14.sp, color = Color.White)
+                        Text(
+                            "Tap to open the release page. Update the desktop side too — they ship together.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF9A9AB0)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+            }
 
             // What the tablet is for, right now. Everything below only applies
             // when it is a screen, so the stream controls fold away when it

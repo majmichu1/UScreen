@@ -30,6 +30,11 @@ class TouchCapture {
     var onModeKnown: ((penOnly: Boolean) -> Unit)? = null
     var onCodecKnown: ((codec: String) -> Unit)? = null
 
+    /// Session token from the host, delivered as an intent extra when the
+    /// daemon launches us over adb. Must be the first thing sent on the
+    /// socket; without it the host closes the connection unanswered.
+    @Volatile var token: String? = null
+
     /** Settings to (re)send to the host whenever the control channel connects */
     @Volatile private var pendingConfig: JSONObject? = null
     @Volatile private var pendingMode: JSONObject? = null
@@ -62,6 +67,15 @@ class TouchCapture {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             isConnected = true
             Log.i(TAG, "Connected")
+            // Authenticate before anything else. If we have no token yet the
+            // host will drop us and relaunch the app with one, and the
+            // reconnect logic takes it from there.
+            token?.let { t ->
+                webSocket.send(JSONObject().apply {
+                    put("type", "auth")
+                    put("token", t)
+                }.toString())
+            } ?: Log.w(TAG, "No session token yet — the host will send one")
             if (nativeWidth > 0 && nativeHeight > 0) {
                 val res = JSONObject().apply {
                     put("type", "resolution")

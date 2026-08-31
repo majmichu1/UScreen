@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -13,7 +12,12 @@ use tokio::sync::{broadcast, watch};
 use tracing::{error, info, warn};
 
 const RECONNECT_DELAY_MS: u64 = 2000;
-pub const FIFO_PATH: &str = "/tmp/uscreen_capture.fifo";
+/// Capture FIFO, in the per-user runtime directory. It used to be
+/// /tmp/uscreen_capture.fifo with mode 0666, which let any local account read
+/// the raw frames off it.
+pub fn fifo_path() -> String {
+    crate::runtime::fifo_path().to_string_lossy().into_owned()
+}
 
 
 /// Which bitstream syntax is in play. H.264 and HEVC agree on Annex B start
@@ -301,31 +305,16 @@ impl CaptureManager {
     }
 
     fn ensure_fifo(path: &str) -> Result<()> {
-        // Check if FIFO already exists and is usable
-        match std::fs::metadata(path) {
-            Ok(meta) if meta.file_type().is_fifo() => {
-                // Check permissions instead of opening (opening a FIFO for write would block)
-                if meta.permissions().mode() & 0o200 != 0 {
-                    return Ok(());
-                }
-                // Not writable — need to recreate
-                let _ = std::fs::remove_file(path);
-            }
-            Ok(_) => {
-                // Regular file in the way
-                let _ = std::fs::remove_file(path);
-            }
-            Err(_) => {} // Doesn't exist, will create below
-        }
-
-        let status = std::process::Command::new("mkfifo")
-            .arg("-m")
-            .arg("0666")
-            .arg(path)
-            .status()
-            .context("Failed to run mkfifo")?;
-        if !status.success() {
-            anyhow::bail!("mkfifo failed");
+        // Anything already there is replaced, whatever it is: a stale FIFO
+        // may carry old permissions, and a regular file or symlink in this
+        // spot is not ours. mkfifo itself never follows symlinks.
+        let _ = std::fs::remove_file(path);
+        let c = std::ffi::CString::new(path).context("fifo path")?;
+        // 0600: the helper writes it and the encoder reads it, both as this
+        // user. Nobody else has any business with a live copy of the screen.
+        let rc = unsafe { libc::mkfifo(c.as_ptr(), 0o600) };
+        if rc != 0 {
+            return Err(std::io::Error::last_os_error()).context("mkfifo");
         }
         Ok(())
     }
@@ -557,7 +546,8 @@ impl CaptureManager {
     }
 
     async fn start_helper(&mut self) -> Result<()> {
-        Self::ensure_fifo(FIFO_PATH)?;
+        let fifo = fifo_path();
+        Self::ensure_fifo(&fifo)?;
 
         // Kill any stray helper from a previous run before spawning a new one.
         // kill_on_drop only fires on a graceful exit; if the daemon was
@@ -578,7 +568,7 @@ impl CaptureManager {
         // pipe granularity and corrupt frames. Match on the FIFO path so we
         // never touch an unrelated ffmpeg invocation.
         let killed_ffmpeg = Command::new("pkill")
-            .args(["-f", &format!("ffmpeg.*{}", FIFO_PATH)])
+            .args(["-f", &format!("ffmpeg.*{}", fifo)])
             .status()
             .await
             .map(|s| s.success())
@@ -613,7 +603,7 @@ impl CaptureManager {
             cmd.args(["--scale", &self.config.stream_scale.to_string()]);
         }
 
-        cmd.args(["--capture-fifo", FIFO_PATH]);
+        cmd.args(["--capture-fifo", &fifo]);
 
         cmd.stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -779,7 +769,7 @@ impl CaptureManager {
             "-framerate".into(),
             fps.to_string(),
             "-i".into(),
-            FIFO_PATH.into(),
+            fifo_path(),
         ]);
 
         if encoder == "h264_vaapi" {
@@ -1108,7 +1098,7 @@ impl CaptureManager {
                     );
                     tokio::task::spawn_blocking(move || {
                         crate::encoder::run(
-                            FIFO_PATH, &name, w, h, fps, bitrate, quality, tx2, cc, idr, stopc,
+                            &fifo_path(), &name, w, h, fps, bitrate, quality, tx2, cc, idr, stopc,
                             lat,
                         )
                     })
@@ -1392,7 +1382,7 @@ impl CaptureManager {
         if let Some(mut child) = self.helper_child.take() {
             Self::terminate(&mut child, "evdi_helper").await;
         }
-        let _ = std::fs::remove_file(FIFO_PATH);
+        let _ = std::fs::remove_file(fifo_path());
     }
 
     /// SIGTERM first, then reap. The helper installs a SIGTERM handler and uses
@@ -1418,7 +1408,7 @@ impl CaptureManager {
 impl Drop for CaptureManager {
     fn drop(&mut self) {
         self.stop();
-        let _ = std::fs::remove_file(FIFO_PATH);
+        let _ = std::fs::remove_file(fifo_path());
     }
 }
 

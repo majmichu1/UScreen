@@ -22,13 +22,18 @@ const SEND_BUFFER_BYTES: libc::c_int = 128 * 1024;
 
 pub struct StreamConfig {
     pub video_port: u16,
+    /// This run's session token; `None` disables the check.
+    pub token: Option<String>,
 }
 
 impl Default for StreamConfig {
     fn default() -> Self {
-        Self { video_port: 8890 }
+        Self { video_port: 8890, token: None }
     }
 }
+
+/// How long a client gets to present the token before the socket is closed.
+const AUTH_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(3);
 
 pub struct StreamServer {
     config: StreamConfig,
@@ -92,8 +97,9 @@ impl StreamServer {
             self.idr_wanted.store(true, Ordering::SeqCst);
             let rx = video_rx.resubscribe();
             let cc = self.codec_config.clone();
+            let token = self.config.token.clone();
             tokio::spawn(async move {
-                if let Err(e) = Self::handle_client(socket, rx, cc).await {
+                if let Err(e) = Self::handle_client(socket, rx, cc, token).await {
                     warn!("Client {} disconnected: {}", peer, e);
                 }
                 info!("Client {} session ended", peer);
@@ -107,9 +113,28 @@ impl StreamServer {
         mut socket: TcpStream,
         mut rx: broadcast::Receiver<VideoPacket>,
         codec_config: Arc<Mutex<Option<Bytes>>>,
+        token: Option<String>,
     ) -> Result<()> {
         // Disable Nagle's algorithm for lower latency
         socket.set_nodelay(true)?;
+
+        // Nothing leaves this socket until the client has proved it is the
+        // tablet we launched. The first 64 bytes are the session token in
+        // hex; anything else, or silence, and the connection is dropped.
+        if let Some(expected) = token.as_deref() {
+            use tokio::io::AsyncReadExt;
+            let mut buf = [0u8; 64];
+            let read = tokio::time::timeout(AUTH_TIMEOUT, socket.read_exact(&mut buf)).await;
+            let ok = matches!(read, Ok(Ok(_)))
+                && std::str::from_utf8(&buf)
+                    .map(|t| crate::runtime::token_matches(expected, t))
+                    .unwrap_or(false);
+            if !ok {
+                warn!("Video client did not present a valid session token — dropped. \
+                       An app older than 1.1.0 cannot authenticate: update it.");
+                return Ok(());
+            }
+        }
 
         // Cap the kernel send buffer. Linux auto-tunes this into the megabytes,
         // which on a link slower than the encoder means frames sit invisibly in

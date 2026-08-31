@@ -201,7 +201,7 @@ pub fn run(
     use std::os::unix::fs::OpenOptionsExt;
     let mut fifo = std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NONBLOCK)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
         .open(fifo_path)
         .with_context(|| format!("open {} for reading", fifo_path))?;
     tracing::info!(
