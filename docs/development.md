@@ -136,7 +136,21 @@ GH_TOKEN=... make publish NOTES=release-notes.md
 
 `make publish` runs `scripts/build-release.sh` and `packaging/build-packages.sh`,
 refuses to continue unless all five release files exist, creates the GitHub
-release for the already-pushed tag and uploads everything plus `SHA256SUMS`.
-Bump `VERSION` in the Makefile, `version` in both `Cargo.toml` files and
-`versionCode`/`versionName` in `android/app/build.gradle.kts` first, and tag
-`vX.Y.Z`.
+release for the already-pushed tag (titled *UScreen X.Y.Z — USB second monitor
+for Linux with S Pen support*) and uploads everything plus `SHA256SUMS`.
+
+Before that, for a new version:
+
+1. Bump `VERSION` in the Makefile, `version` in both `Cargo.toml` files and
+   `versionCode`/`versionName` in `android/app/build.gradle.kts`.
+2. Add a `## X.Y.Z — YYYY-MM-DD` entry to `CHANGELOG.md`.
+3. `make release-metadata DATE=YYYY-MM-DD` (or
+   `scripts/update-release-metadata.sh X.Y.Z YYYY-MM-DD`): rewrites the
+   version, dates and package names in `docs/index.html` (including the
+   JSON-LD), `docs/llms.txt`, `docs/sitemap.xml` and `CITATION.cff`.
+4. Commit, tag `vX.Y.Z`, push both.
+
+`make publish` re-checks all of it (`update-release-metadata.sh --check`,
+the Cargo/Gradle versions, the changelog entry) and stops with a message
+naming the stale file rather than publishing a page that still says the
+previous version. The date defaults to today; `RELEASE_DATE=YYYY-MM-DD` overrides it.

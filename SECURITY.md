@@ -11,9 +11,9 @@
   protects against other local processes and other apps on the tablet.
 - The capture FIFO and the token live in `$XDG_RUNTIME_DIR/uscreen/`, a
   per-user directory with mode 0700; both files are 0600.
-- **Nothing is sent anywhere.** Screen content and input go only between your
-  computer and your tablet over the USB cable (or your own network, if you
-  chose Wi-Fi). There is no account, no telemetry and no cloud.
+- **Screen and input data never leave the cable.** They go only between your
+  computer and your tablet over USB (or your own network, if you chose Wi-Fi).
+  There is no account, no telemetry and no cloud.
 - The only outbound connection is an optional **update check**: one HTTPS
   request to `api.github.com` (daemon: once a day; app and GUI: when opened)
   that reads the latest release tag. It is off with `check_updates = false`.

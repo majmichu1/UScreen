@@ -1,4 +1,4 @@
-.PHONY: all build build-helper install clean run android adb edid status stop list dist setup-system
+.PHONY: all build build-helper install clean run android adb edid status stop list dist setup-system publish release-metadata
 
 VERSION = 1.1.0
 
@@ -87,6 +87,11 @@ stop:
 # Usage: GH_TOKEN=... make publish NOTES=path/to/notes.md
 publish:
 	./scripts/publish-release.sh $(NOTES)
+
+# Write VERSION and the release date into the website, llms.txt, sitemap and
+# CITATION.cff. Usage: make release-metadata DATE=2026-09-15 (default: today)
+release-metadata:
+	./scripts/update-release-metadata.sh $(VERSION) $(or $(DATE),$(shell date +%F))
 
 dist:
 	@# Portable binaries (built against Debian 12 glibc) when the build

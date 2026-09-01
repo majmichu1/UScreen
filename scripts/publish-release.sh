@@ -11,7 +11,22 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 VERSION="$(sed -n 's/^VERSION = //p' Makefile)"
 REPO="majmichu1/UScreen"
+# The date that goes on the website and in CITATION.cff. Today unless the
+# release was dated in advance.
+RELEASE_DATE="${RELEASE_DATE:-$(date +%F)}"
 : "${GH_TOKEN:?set GH_TOKEN first}"
+
+# Every place that repeats the version has to agree with the Makefile before
+# anything is built, so the public page never advertises the previous release.
+for f in host/Cargo.toml gui/Cargo.toml; do
+  grep -q "^version = \"$VERSION\"" "$f" || { echo "!! $f is not at version $VERSION"; exit 1; }
+done
+grep -q "versionName = \"$VERSION\"" android/app/build.gradle.kts \
+  || { echo "!! android/app/build.gradle.kts versionName is not $VERSION"; exit 1; }
+grep -q "^## $VERSION — $RELEASE_DATE" CHANGELOG.md \
+  || { echo "!! CHANGELOG.md has no '## $VERSION — $RELEASE_DATE' entry (set RELEASE_DATE=YYYY-MM-DD if the release is dated differently)"; exit 1; }
+./scripts/update-release-metadata.sh --check "$VERSION" "$RELEASE_DATE" \
+  || { echo "!! website/citation metadata is stale — run 'scripts/update-release-metadata.sh $VERSION $RELEASE_DATE', commit, then publish again"; exit 1; }
 
 [ -z "$(git status --porcelain)" ] || { echo "!! uncommitted changes — commit first"; exit 1; }
 
@@ -44,13 +59,17 @@ NOTES="${1:-}"
 
 git rev-parse "v$VERSION" >/dev/null 2>&1 || { echo "!! tag v$VERSION does not exist — create and push it first"; exit 1; }
 
-RID=$(python3 - "$NOTES" "$VERSION" <<'PY'
+# The release title is what shows up in feeds and search results, so it says
+# what the project is rather than just the tag.
+TITLE="UScreen $VERSION — USB second monitor for Linux with S Pen support"
+
+RID=$(python3 - "$NOTES" "$VERSION" "$TITLE" <<'PY'
 import json, sys, urllib.request
 body = open(sys.argv[1]).read()
-v = sys.argv[2]
+v, title = sys.argv[2], sys.argv[3]
 req = urllib.request.Request(
     "https://api.github.com/repos/majmichu1/UScreen/releases",
-    data=json.dumps({"tag_name": f"v{v}", "name": f"v{v}", "body": body}).encode(),
+    data=json.dumps({"tag_name": f"v{v}", "name": title, "body": body}).encode(),
     headers={"Authorization": "Bearer " + __import__("os").environ["GH_TOKEN"],
              "Content-Type": "application/json"})
 print(json.load(urllib.request.urlopen(req))["id"])

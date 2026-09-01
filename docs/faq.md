@@ -12,12 +12,13 @@ be moved onto it, it has its own resolution and position, and it is not a
 mirror.
 
 **Does UScreen work over a normal USB cable?**
-Yes. It uses the adb connection that USB debugging provides; no special cable
-and no USB tethering.
+Yes, over a normal data-capable USB cable (charge-only cables carry no data).
+It uses the adb connection that USB debugging provides; no special cable and
+no USB tethering.
 
 **Does UScreen require USB tethering or Wi-Fi?**
-No. USB with USB debugging enabled is the normal mode. Wi-Fi works as a
-fallback (`adb tcpip`), with noticeably more stutter — see the benchmarks.
+No. USB tethering is not needed; USB debugging is. Wi-Fi works as a fallback
+(`adb tcpip`), with noticeably more stutter — see the benchmarks.
 
 **Does UScreen support Samsung S Pen pressure and tilt?**
 Yes: pressure, tilt, the eraser end and the stylus button are all forwarded
@@ -40,9 +41,9 @@ No. The virtual display is created in software by EVDI.
 Android 8.1 and newer, on any device with a hardware H.264 decoder.
 
 **Is screen or input data sent to the cloud?**
-No. Video and input travel only between your computer and your tablet, over
-the cable (or your own network if you chose Wi-Fi). The only outbound request
-is an optional check of the latest release tag on GitHub. See
+No. Screen and input data never leave the cable (or your own network if you
+chose Wi-Fi). The only outbound request is an optional check of the latest
+release tag on GitHub, off with `check_updates = false`. See
 [SECURITY.md](../SECURITY.md).
 
 **How is UScreen different from Weylus?**

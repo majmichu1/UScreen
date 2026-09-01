@@ -9,7 +9,7 @@ please add yours.
 | distribution | desktop | GPU / encoder | result | source |
 | --- | --- | --- | --- | --- |
 | Bazzite (Fedora Atomic 42) | KDE Plasma 6, Wayland | NVIDIA RTX 5060 Laptop, `h264_nvenc` / `hevc_nvenc` | works; all measurements in [benchmarks.md](benchmarks.md) | maintainer |
-| Arch Linux | KDE Plasma, Wayland | — | works (after the 1.0.2 install fixes) | [issue #2](https://github.com/majmichu1/UScreen/issues/2) |
+| Arch Linux | KDE Plasma, Wayland | — | works — externally verified on a real system after the v1.0.2 installer/EVDI fixes; the application connected and ran successfully. Installed through `install.sh` from v1.0.2 plus the EVDI initialisation described in the issue; the v1.1.0 PKGBUILD has not yet been run end to end on a real Arch machine ([issue #3](https://github.com/majmichu1/UScreen/issues/3)) | [external report](https://github.com/majmichu1/UScreen/issues/2#issuecomment-5478643599) |
 | Debian 12 | — | — | package installs and binaries run; not exercised with a tablet | maintainer, container |
 | Fedora 42 | — | — | rpm installs; evdi must be built from source | maintainer, container |
 | openSUSE Tumbleweed | — | — | dependencies resolve; not exercised with a tablet | maintainer, container |

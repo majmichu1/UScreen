@@ -6,7 +6,8 @@ graphics tablet, with touch, S Pen pressure, tilt, eraser and stylus-button
 support.
 
 UScreen uses a direct ADB-over-USB connection — no Wi-Fi, USB tethering,
-dummy HDMI plug or cloud account required. Nothing leaves the cable.
+dummy HDMI plug or cloud account required. Screen and input data never leave
+the cable.
 
 Tested on Bazzite (KDE Plasma, Wayland, NVIDIA) with a Samsung Galaxy Tab S9
 Ultra. Packages and installation instructions cover Bazzite, Fedora,
@@ -72,7 +73,7 @@ help the next Linux user find it.
 | host | tablet | result |
 | --- | --- | --- |
 | Bazzite, KDE Plasma 6 Wayland, NVIDIA RTX 5060 | Galaxy Tab S9 Ultra, Android 14 | works — reference setup, all benchmarks |
-| Arch Linux, KDE Plasma Wayland | — | works ([#2](https://github.com/majmichu1/UScreen/issues/2)) |
+| Arch Linux, KDE Plasma Wayland | — | works — externally verified on a real system after the v1.0.2 installer/EVDI fixes; the app connected and ran ([report](https://github.com/majmichu1/UScreen/issues/2#issuecomment-5478643599)). The 1.1.0 PKGBUILD itself is not yet verified there ([#3](https://github.com/majmichu1/UScreen/issues/3)) |
 | Debian 12 · Fedora 42 · openSUSE Tumbleweed | — | packages install and run (container-tested, no tablet) |
 
 Any Android 8.1+ tablet with a hardware H.264 decoder should work — the
@@ -96,7 +97,7 @@ The tablet's hardware decoder is most of the budget (~15 ms), the USB hop
 
 ## Compared with the alternatives
 
-Checked against each project's own documentation in August 2026; corrections
+Checked against official project documentation in August 2026; corrections
 welcome.
 
 | | UScreen | [SuperDisplay](https://superdisplay.app/) | [Weylus](https://github.com/H-M-H/Weylus) | [Sunshine](https://github.com/LizardByte/Sunshine) + Moonlight | [spacedesk](https://www.spacedesk.net/) |
@@ -109,6 +110,11 @@ welcome.
 | Hardware video encoding | NVENC / VAAPI / x264 | yes | yes (VAAPI/NVENC) | yes | yes |
 | Open source | **MIT** | no | AGPL | GPL | no |
 | Dummy HDMI plug | **no** | no | sometimes | often | no |
+
+Also current: [MoreSpace](https://morespaceapp.com/) — a Linux host daemon
+with an Android app, extended display by default, USB or Wi-Fi, pressure-
+sensitive stylus; its documentation does not state tilt or eraser support, the
+USB protocol, or a license.
 
 ## Settings
 
@@ -133,7 +139,8 @@ Everything lives in `~/.config/uscreen/config.toml` and is reachable from
 
 ## FAQ
 
-**Does it need Wi-Fi or USB tethering?** No — USB with USB debugging. Wi-Fi
+**Does it need Wi-Fi or USB tethering?** No — a normal data-capable USB cable
+with USB debugging enabled on the tablet; USB tethering is not needed. Wi-Fi
 is an optional fallback.
 
 **Is it a mirror or an extension?** An extension; a real monitor in your
@@ -149,8 +156,9 @@ GNOME and X11 get the display and the stream; input mapping is manual there.
 
 **Which Android versions?** 8.1 and newer.
 
-**Is anything sent to the cloud?** No. The only outbound request is an
-optional version check against GitHub.
+**Is anything sent to the cloud?** No. Screen and input data never leave the
+cable; the only outbound request is an optional version check against GitHub
+(`check_updates = false` turns it off).
 
 **How do I uninstall it completely?** [SECURITY.md](SECURITY.md#how-to-uninstall-completely)
 lists every file.

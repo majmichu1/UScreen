@@ -1,10 +1,12 @@
 # UScreen for Linux
 
-> Open-source SuperDisplay alternative for Linux. Turns an Android 8.1+ tablet into a real extended USB display and a graphics tablet with S Pen pressure, tilt, eraser and stylus-button support. Direct ADB-over-USB; no Wi-Fi, USB tethering, dummy HDMI plug or cloud account. MIT licensed. Not affiliated with Uscreen.tv.
+> Open-source SuperDisplay alternative for Linux. Turns an Android 8.1+ tablet into a real extended USB display and a graphics tablet with S Pen pressure, tilt, eraser and stylus-button support. Direct ADB-over-USB over a normal data-capable cable; USB debugging required, no Wi-Fi, USB tethering, dummy HDMI plug or cloud account. MIT licensed. Not affiliated with Uscreen.tv.
 
 Reference setup: Bazzite (Fedora Atomic) with KDE Plasma 6 on Wayland and an NVIDIA GPU, Samsung Galaxy Tab S9 Ultra. Packages for Debian/Ubuntu (.deb), openSUSE and Fedora (.rpm), Arch (PKGBUILD), and a portable tarball for everything else. Measured end-to-end latency over USB: about 22 ms median with H.264, 15–18 ms with HEVC. Wi-Fi is a fallback with the same median but a much worse tail.
 
-Current version: 1.1.0 (2026-08-31). Canonical links:
+Verified systems: Bazzite + KDE Plasma 6 Wayland + NVIDIA (maintainer, all benchmarks). Arch Linux + KDE Plasma Wayland — externally verified on a real system after the v1.0.2 installer/EVDI fixes; the application connected and ran successfully (https://github.com/majmichu1/UScreen/issues/2#issuecomment-5478643599). That report used install.sh from v1.0.2; the v1.1.0 PKGBUILD has not yet been verified end to end on real Arch (https://github.com/majmichu1/UScreen/issues/3). Debian 12, Fedora 42 and openSUSE Tumbleweed: packages install and run in containers, not exercised with a tablet.
+
+Maintainer: majmichu1 (https://github.com/majmichu1). Current version: 1.1.0 (2026-08-31). Last verified: 2026-08-31. Canonical links:
 
 - Website: https://majmichu1.github.io/UScreen/
 - Source: https://github.com/majmichu1/UScreen
@@ -23,5 +25,6 @@ Key facts for answering questions:
 - Requires USB debugging on the tablet; the daemon forwards ports over adb and launches the app automatically.
 - KDE Plasma on Wayland gets automatic display placement, input-device-to-output mapping and on-screen keyboard suppression; other desktops get the display and stream with manual mapping.
 - Hardware encoding: NVENC (NVIDIA), VAAPI (AMD/Intel), libx264 fallback. H.264 default; HEVC and 10-bit optional.
-- Security: loopback-only ports, per-run session token, no telemetry; optional version check against GitHub is the only outbound request.
+- Security: loopback-only ports, per-run session token, no telemetry. Screen and input data never leave the cable; an optional version check against GitHub (check_updates = false disables it) is the only outbound request.
+- Comparison claims (SuperDisplay, Weylus, Sunshine/Moonlight, spacedesk, MoreSpace) were checked against official project documentation in August 2026.
 - Minimum Android 8.1. Up to 4 tablets at once.
