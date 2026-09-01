@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
     private var penOnlyMode by mutableStateOf(false)
     private var updateAvailable by mutableStateOf<String?>(null)
     private var updateChecked = false
+    private var showThanks by mutableStateOf(false)
     private var videoReceiver: VideoReceiver? = null
     private var touchCapture: TouchCapture? = null
     private lateinit var prefs: Prefs
@@ -59,6 +60,11 @@ class MainActivity : ComponentActivity() {
         // lets the host time capture→display on its own clock.
         videoReceiver?.onFrameRendered = { seq, decodeUs ->
             touchCapture?.sendRendered(seq, decodeUs)
+            // First frame ever on screen: say thanks once, then never again.
+            if (!prefs.thankedOnce) {
+                prefs.thankedOnce = true
+                runOnUiThread { showThanks = true }
+            }
         }
         videoReceiver?.streamFps = prefs.fps
         touchCapture?.onCodecKnown = { codec ->
@@ -115,6 +121,8 @@ class MainActivity : ComponentActivity() {
                 UScreenMain(
                     penOnly = penOnlyMode,
                     updateAvailable = updateAvailable,
+                    showThanks = showThanks,
+                    onDismissThanks = { showThanks = false },
                     videoReceiver = videoReceiver,
                     touchCapture = touchCapture,
                     prefs = prefs,
@@ -332,6 +340,8 @@ fun UScreenMain(
     onSurfaceReady: (SurfaceView) -> Unit,
     penOnly: Boolean = false,
     updateAvailable: String? = null,
+    showThanks: Boolean = false,
+    onDismissThanks: () -> Unit = {},
     onSurfaceDestroyed: () -> Unit = {},
     videoReceiver: VideoReceiver? = null,
     touchCapture: TouchCapture? = null,
@@ -457,6 +467,38 @@ fun UScreenMain(
             contentAlignment = Alignment.Center
         ) {
             Text("⚙", fontSize = 18.sp, color = Color.White)
+        }
+
+        // One-time note after the first successful picture. Dismissable, never
+        // repeated: the point is one honest ask, not a nag.
+        if (showThanks) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(24.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xE620202C))
+                    .padding(16.dp)
+            ) {
+                Column {
+                    Text("UScreen is working.", fontSize = 15.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                    Text(
+                        "If it replaced a second monitor for you, a star on GitHub or a compatibility " +
+                            "report helps other Linux users find it. This note appears only once.",
+                        fontSize = 12.sp, color = Color(0xFFB0B0C0)
+                    )
+                    Row(modifier = Modifier.padding(top = 10.dp)) {
+                        Text("Open GitHub", fontSize = 13.sp, color = Accent,
+                            modifier = Modifier.clickable {
+                                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://github.com/majmichu1/UScreen")))
+                                onDismissThanks()
+                            }.padding(end = 20.dp))
+                        Text("Dismiss", fontSize = 13.sp, color = Color(0xFF9A9AB0),
+                            modifier = Modifier.clickable { onDismissThanks() })
+                    }
+                }
+            }
         }
 
         // "Update available" pill under the settings handle. Small, and gone

@@ -33,6 +33,12 @@ for a in "${ASSETS[@]}"; do
 done
 echo "All $(( ${#ASSETS[@]} )) files present."
 
+# Checksums for everything above, published alongside.
+( cd dist && sha256sum "uscreen-$VERSION-linux-x86_64.tar.gz" "uscreen_${VERSION}_amd64.deb" \
+    "uscreen-$VERSION-1.x86_64.rpm" "uscreen-$VERSION-PKGBUILD.tar.gz" > SHA256SUMS \
+  && cp "uscreen-$VERSION/uscreen.apk" . && sha256sum uscreen.apk >> SHA256SUMS && rm uscreen.apk )
+ASSETS+=("dist/SHA256SUMS:text/plain")
+
 NOTES="${1:-}"
 [ -n "$NOTES" ] && [ -f "$NOTES" ] || { echo "usage: $0 <release-notes.md>  (tag v$VERSION must exist on origin)"; exit 1; }
 

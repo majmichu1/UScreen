@@ -282,6 +282,26 @@ struct App {
 const RELEASES_API: &str = "https://api.github.com/repos/majmichu1/UScreen/releases/latest";
 const RELEASES_PAGE: &str = "https://github.com/majmichu1/UScreen/releases/latest";
 
+fn os_release_name() -> String {
+    std::fs::read_to_string("/etc/os-release")
+        .ok()
+        .and_then(|t| t.lines().find_map(|l| l.strip_prefix("PRETTY_NAME=").map(|v| v.trim_matches('"').to_string())))
+        .unwrap_or_default()
+        + " / " + &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default()
+        + " (" + &std::env::var("XDG_SESSION_TYPE").unwrap_or_default() + ")"
+}
+
+fn urlencode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
 fn version_parts(v: &str) -> (u32, u32, u32) {
     let mut it = v.trim().trim_start_matches('v').split('.').map(|p| p.parse().unwrap_or(0));
     (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
@@ -384,6 +404,22 @@ impl eframe::App for App {
             ui.add_space(6.0);
             ui.heading(egui::RichText::new("UScreen").size(26.0));
             ui.label(egui::RichText::new("USB second display for your tablet").weak());
+            ui.horizontal(|ui| {
+                if ui.small_button("Report compatibility").on_hover_text(
+                    "Opens a GitHub issue pre-filled with your setup. Nothing is sent until you submit it.").clicked()
+                {
+                    let body = format!(
+                        "Result: \n\nDistribution and desktop: {}\nGPU and encoder: {}\nTablet, Android, stylus: {}\nUScreen version: {}\n\nLatency line from the log (optional):\n\nNotes:\n",
+                        os_release_name(), self.cfg.encoder, status.tablet_model, env!("CARGO_PKG_VERSION"));
+                    let url = format!(
+                        "https://github.com/majmichu1/UScreen/issues/new?template=compatibility.yml&title={}&body={}",
+                        urlencode("Compatibility: "), urlencode(&body));
+                    let _ = Command::new("xdg-open").arg(url).spawn();
+                }
+                if ui.small_button("Star on GitHub").clicked() {
+                    let _ = Command::new("xdg-open").arg("https://github.com/majmichu1/UScreen").spawn();
+                }
+            });
             if let Some(v) = self.update.lock().ok().and_then(|g| g.clone()) {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {

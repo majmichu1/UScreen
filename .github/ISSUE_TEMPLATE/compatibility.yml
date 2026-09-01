@@ -1,0 +1,54 @@
+name: Compatibility report
+description: It works (or almost works) on hardware not listed yet — tell others
+labels: [compatibility]
+body:
+  - type: markdown
+    attributes:
+      value: "Thanks — every report becomes a row in docs/compatibility.md. Most of this is in the output of `uscreen doctor`."
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works
+        - Works with a workaround (describe below)
+        - Does not work
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and desktop
+      placeholder: "Ubuntu 24.04, KDE Plasma 6.2 (Wayland)"
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and encoder used
+      placeholder: "AMD RX 7800, h264_vaapi"
+    validations:
+      required: true
+  - type: input
+    id: tablet
+    attributes:
+      label: Tablet, Android version, stylus
+      placeholder: "Galaxy Tab S8, Android 14, S Pen"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: UScreen version and how you installed it
+      placeholder: "1.1.0, .deb"
+    validations:
+      required: true
+  - type: textarea
+    id: latency
+    attributes:
+      label: Latency line from the daemon log (optional)
+      placeholder: "Latency encode→display: p50 19.3ms p95 22.9ms"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else

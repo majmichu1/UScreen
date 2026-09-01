@@ -57,4 +57,9 @@ class Prefs(context: Context) {
     var hostToken: String?
         get() = sp.getString("host_token", null)
         set(v) = sp.edit().putString("host_token", v).apply()
+
+    /** Shown once, after the first time video actually arrived. */
+    var thankedOnce: Boolean
+        get() = sp.getBoolean("thanked_once", false)
+        set(v) = sp.edit().putBoolean("thanked_once", v).apply()
 }

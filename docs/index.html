@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UScreen for Linux — Android Tablet as a USB Second Monitor with S Pen Support</title>
+<meta name="description" content="UScreen is an open-source SuperDisplay alternative for Linux: turn an Android tablet into a real extended USB display and graphics tablet with S Pen pressure and tilt. No Wi-Fi, tethering, dummy plug or cloud. KDE Plasma, Wayland, Bazzite, Fedora, Ubuntu, Arch, openSUSE.">
+<link rel="canonical" href="https://majmichu1.github.io/UScreen/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="UScreen for Linux — Android tablet as a USB second monitor">
+<meta property="og:description" content="Open-source SuperDisplay alternative for Linux. Real extended display over USB, S Pen pressure and tilt, ~22 ms end-to-end latency measured.">
+<meta property="og:url" content="https://majmichu1.github.io/UScreen/">
+<meta property="og:image" content="https://opengraph.githubassets.com/1/majmichu1/UScreen">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "UScreen for Linux",
+  "alternateName": "UScreen",
+  "applicationCategory": "UtilitiesApplication",
+  "operatingSystem": "Linux, Android 8.1+",
+  "softwareVersion": "1.1.0",
+  "datePublished": "2026-08-31",
+  "license": "https://opensource.org/licenses/MIT",
+  "isAccessibleForFree": true,
+  "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+  "url": "https://majmichu1.github.io/UScreen/",
+  "downloadUrl": "https://github.com/majmichu1/UScreen/releases/latest",
+  "codeRepository": "https://github.com/majmichu1/UScreen",
+  "author": {"@type": "Person", "name": "majmichu1", "url": "https://github.com/majmichu1"},
+  "description": "Open-source SuperDisplay alternative for Linux: an Android tablet as a real extended USB display and graphics tablet with S Pen pressure, tilt, eraser and button support. Direct ADB-over-USB, no Wi-Fi, tethering, dummy HDMI plug or cloud account.",
+  "featureList": [
+    "Real extended display via the EVDI kernel module",
+    "S Pen pressure, tilt, eraser and stylus button as a Linux graphics tablet",
+    "Direct USB connection over adb, Wi-Fi as a fallback",
+    "Graphics-tablet mode with zero display latency",
+    "Hardware encoding (NVENC, VAAPI) and decoding, H.264 and HEVC",
+    "Measured ~22 ms median end-to-end latency over USB",
+    "Packages for Debian, Ubuntu, Fedora, openSUSE, Arch, Bazzite",
+    "Several tablets at once"
+  ]
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "What is the best open-source SuperDisplay alternative for Linux?",
+     "acceptedAnswer": {"@type": "Answer", "text": "UScreen for Linux turns an Android tablet into a real extended display over a USB cable, with S Pen pressure and tilt, on a Linux host. SuperDisplay itself only supports Windows and macOS hosts."}},
+    {"@type": "Question", "name": "Can an Android tablet be used as a real second monitor on Linux?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes. UScreen creates a virtual display through the EVDI kernel module, so the tablet appears in the display settings like any monitor. It extends the desktop rather than mirroring it."}},
+    {"@type": "Question", "name": "Does UScreen require USB tethering or Wi-Fi?",
+     "acceptedAnswer": {"@type": "Answer", "text": "No. It uses the adb connection provided by USB debugging over a normal USB cable. Wi-Fi works as a fallback with more stutter."}},
+    {"@type": "Question", "name": "Does UScreen support Samsung S Pen pressure and tilt?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes: pressure, tilt, the eraser end and the stylus button are forwarded to Linux as a graphics-tablet device, so Krita, GIMP and Blender see a real tablet."}},
+    {"@type": "Question", "name": "Does UScreen work on Bazzite and KDE Wayland?",
+     "acceptedAnswer": {"@type": "Answer", "text": "That is the reference setup. KDE Plasma on Wayland gets automatic display placement, input mapping and on-screen keyboard suppression. Other desktops get the display and the stream; input mapping is manual."}},
+    {"@type": "Question", "name": "Does UScreen require a dummy HDMI plug?",
+     "acceptedAnswer": {"@type": "Answer", "text": "No. The virtual display is created in software by the EVDI kernel module."}},
+    {"@type": "Question", "name": "What Android versions are supported?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Android 8.1 and newer, on any tablet with a hardware H.264 decoder."}},
+    {"@type": "Question", "name": "Is screen or input data sent to the cloud?",
+     "acceptedAnswer": {"@type": "Answer", "text": "No. Video and input travel only between the computer and the tablet. The only outbound request is an optional check of the latest release on GitHub."}},
+    {"@type": "Question", "name": "How is UScreen different from Weylus?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Weylus turns the tablet's browser into an input device and can show the screen in it; a virtual display must be set up separately. UScreen creates the virtual display itself, streams it with hardware encoding to a native app with hardware decoding, and maps the input devices onto that display automatically on KDE."}},
+    {"@type": "Question", "name": "How do I uninstall UScreen completely?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Remove the package or the files in ~/.local/bin, the systemd user unit, and the three system files the installer creates (modprobe.d, modules-load.d, udev rule). The exact commands are in SECURITY.md in the repository."}}
+  ]
+}
+</script>
+<style>
+  :root { color-scheme: light dark; --fg:#1b1b1f; --bg:#fbfbfd; --muted:#5d5f6b; --accent:#5b5bd6; --line:#e3e3ea; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e8e8ee; --bg:#121218; --muted:#9a9ab0; --accent:#8c8cff; --line:#2a2a36; } }
+  body { margin:0; font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--fg); background:var(--bg); }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 2rem; line-height:1.2; margin: 0 0 12px; }
+  h2 { margin-top: 40px; border-bottom:1px solid var(--line); padding-bottom:6px; }
+  .lead { font-size: 1.15rem; }
+  .muted { color: var(--muted); }
+  .cta a { display:inline-block; margin: 8px 8px 0 0; padding: 10px 16px; border-radius: 8px; background: var(--accent); color:#fff; text-decoration:none; font-weight:600; }
+  .cta a.secondary { background: transparent; color: var(--accent); border:1px solid var(--accent); }
+  table { border-collapse: collapse; width:100%; font-size:.95rem; }
+  th, td { text-align:left; padding: 8px 10px; border-bottom:1px solid var(--line); vertical-align: top; }
+  code { background: rgba(127,127,160,.15); padding: 1px 5px; border-radius:4px; font-size:.92em; }
+  details { margin: 10px 0; } summary { cursor:pointer; font-weight:600; }
+  footer { margin-top: 48px; color: var(--muted); font-size:.9rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>UScreen for Linux — Android tablet as a USB second monitor</h1>
+<p class="lead"><strong>UScreen is an open-source SuperDisplay alternative for Linux.</strong> It turns an Android 8.1+ tablet into a real extended USB display and a pressure-sensitive graphics tablet, with touch, S Pen pressure, tilt, eraser and stylus-button support.</p>
+<p>UScreen uses a direct ADB-over-USB connection — no Wi-Fi, USB tethering, dummy HDMI plug or cloud account required. Tested on Bazzite (KDE Plasma, Wayland, NVIDIA) with a Samsung Galaxy Tab S9 Ultra; packages cover Bazzite, Fedora, Ubuntu/Debian, Arch Linux and openSUSE.</p>
+<p class="cta">
+  <a href="https://github.com/majmichu1/UScreen/releases/latest">Download 1.1.0</a>
+  <a class="secondary" href="https://github.com/majmichu1/UScreen/blob/main/docs/installation.md">Installation</a>
+  <a class="secondary" href="https://github.com/majmichu1/UScreen/blob/main/docs/compatibility.md">Compatibility</a>
+  <a class="secondary" href="https://github.com/majmichu1/UScreen/blob/main/docs/benchmarks.md">Benchmarks</a>
+  <a class="secondary" href="https://github.com/majmichu1/UScreen">Source on GitHub</a>
+</p>
+<p class="muted">Version 1.1.0 · released 2026-08-31 · MIT license</p>
+
+<h2>What it does</h2>
+<ul>
+  <li><strong>A real second monitor, not a mirror</strong> — a virtual display through the EVDI kernel module, in your display settings like any other.</li>
+  <li><strong>Pen that works like a tablet</strong> — pressure, tilt, eraser and button arrive as a Linux graphics-tablet device. A one-tap graphics-tablet mode uses the pen on your own screen with zero display latency.</li>
+  <li><strong>Low latency, measured</strong> — about 22 ms median end-to-end over USB with H.264 and 15–18 ms with HEVC on the reference hardware, method published.</li>
+  <li><strong>Plug in and it works</strong> — starts with your desktop, finds the tablet over adb, launches the app, sizes the display to the tablet's panel.</li>
+  <li><strong>Private by construction</strong> — loopback-only ports guarded by a per-session token, no telemetry, no account.</li>
+</ul>
+
+<h2>Quick install</h2>
+<table>
+<tr><th>File</th><th>Distribution</th></tr>
+<tr><td><code>uscreen_1.1.0_amd64.deb</code></td><td>Debian 12+, Ubuntu 22.04+, Mint, Pop — <code>sudo apt install ./uscreen_*.deb</code></td></tr>
+<tr><td><code>uscreen-1.1.0-1.x86_64.rpm</code></td><td>openSUSE; Fedora with RPM Fusion enabled</td></tr>
+<tr><td><code>uscreen-1.1.0-PKGBUILD.tar.gz</code></td><td>Arch and derivatives — <code>makepkg -si</code></td></tr>
+<tr><td><code>uscreen-1.1.0-linux-x86_64.tar.gz</code></td><td>Bazzite, Nobara, anything else — <code>./scripts/install.sh</code></td></tr>
+<tr><td><code>uscreen.apk</code></td><td>the tablet (enable USB debugging)</td></tr>
+</table>
+<p>Then <code>systemctl --user enable --now uscreen</code>, plug the cable in, and the tablet appears as a monitor. <code>uscreen doctor</code> explains anything that is off.</p>
+
+<h2>Measured latency</h2>
+<table>
+<tr><th></th><th>median</th><th>p95</th></tr>
+<tr><td>H.264, NVENC, USB</td><td>18–22 ms</td><td>23–31 ms</td></tr>
+<tr><td>HEVC, NVENC, USB</td><td>15–18 ms</td><td>20–23 ms</td></tr>
+<tr><td>Wi-Fi fallback (H.264)</td><td>22.8 ms</td><td>78.6 ms, worst frames in seconds</td></tr>
+</table>
+<p class="muted">Bazzite KDE + RTX 5060 + Galaxy Tab S9 Ultra at 2960×1848. The tablet's decoder is ~15 ms of it, the USB hop 5–7 ms, the encoder under 1 ms. Method and limitations in the benchmarks page.</p>
+
+<h2>Compared with the alternatives</h2>
+<table>
+<tr><th></th><th>UScreen</th><th>SuperDisplay</th><th>Weylus</th><th>Sunshine + Moonlight</th><th>spacedesk</th></tr>
+<tr><td>Linux host</td><td><strong>yes</strong></td><td>no</td><td>yes</td><td>yes</td><td>no</td></tr>
+<tr><td>Real extended display</td><td><strong>yes</strong> (EVDI)</td><td>yes</td><td>separate setup</td><td>needs existing/dummy display</td><td>yes</td></tr>
+<tr><td>Direct USB, no tethering</td><td><strong>yes</strong></td><td>yes</td><td>via adb forward</td><td>no</td><td>no</td></tr>
+<tr><td>S Pen pressure / tilt / eraser</td><td><strong>yes / yes / yes</strong></td><td>yes / yes / yes</td><td>yes / yes / no</td><td>partial / no / no</td><td>partial / no / no</td></tr>
+<tr><td>Open source</td><td><strong>MIT</strong></td><td>no</td><td>AGPL</td><td>GPL</td><td>no</td></tr>
+</table>
+<p class="muted">Checked against each project's documentation in August 2026; corrections welcome as issues.</p>
+
+<h2>FAQ</h2>
+<details open><summary>Does it need Wi-Fi or USB tethering?</summary><p>No. It uses the adb connection provided by USB debugging over a normal USB cable. Wi-Fi is an optional fallback with more stutter.</p></details>
+<details><summary>Is it a mirror or an extension?</summary><p>An extension: a real monitor in the display settings. Graphics-tablet mode is a separate, non-display mode.</p></details>
+<details><summary>Does S Pen pressure and tilt work?</summary><p>Yes, plus the eraser and the stylus button, as a proper tablet device.</p></details>
+<details><summary>Does it work on Bazzite and KDE Wayland?</summary><p>That is the reference setup. GNOME and X11 get the display and the stream; input mapping is manual there.</p></details>
+<details><summary>Does it need a dummy HDMI plug?</summary><p>No. The virtual display is created in software by EVDI.</p></details>
+<details><summary>Which Android versions?</summary><p>8.1 and newer, on any device with a hardware H.264 decoder.</p></details>
+<details><summary>Is anything sent to the cloud?</summary><p>No. The only outbound request is an optional version check against GitHub.</p></details>
+<details><summary>How is it different from Weylus?</summary><p>Weylus makes the tablet's browser an input device and can show the screen in it; a virtual display has to be set up separately. UScreen creates the display itself, streams it with hardware encoding to a native app, and maps the input onto that display automatically on KDE.</p></details>
+<details><summary>How do I uninstall it completely?</summary><p>Remove the package or the files in <code>~/.local/bin</code>, the systemd user unit, and the three system files the installer creates. The exact commands are in <a href="https://github.com/majmichu1/UScreen/blob/main/SECURITY.md">SECURITY.md</a>.</p></details>
+
+<footer>
+<p><a href="https://github.com/majmichu1/UScreen">Source and issues on GitHub</a> · <a href="https://github.com/majmichu1/UScreen/discussions">Discussions</a> · <a href="https://github.com/majmichu1/UScreen/blob/main/SECURITY.md">Security</a> · <a href="https://github.com/majmichu1/UScreen/blob/main/CHANGELOG.md">Changelog</a> · <a href="llms.txt">llms.txt</a></p>
+<p>UScreen for Linux is not affiliated with Uscreen.tv, SuperDisplay or DisplayLink.</p>
+</footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,27 @@
+# UScreen for Linux
+
+> Open-source SuperDisplay alternative for Linux. Turns an Android 8.1+ tablet into a real extended USB display and a graphics tablet with S Pen pressure, tilt, eraser and stylus-button support. Direct ADB-over-USB; no Wi-Fi, USB tethering, dummy HDMI plug or cloud account. MIT licensed. Not affiliated with Uscreen.tv.
+
+Reference setup: Bazzite (Fedora Atomic) with KDE Plasma 6 on Wayland and an NVIDIA GPU, Samsung Galaxy Tab S9 Ultra. Packages for Debian/Ubuntu (.deb), openSUSE and Fedora (.rpm), Arch (PKGBUILD), and a portable tarball for everything else. Measured end-to-end latency over USB: about 22 ms median with H.264, 15–18 ms with HEVC. Wi-Fi is a fallback with the same median but a much worse tail.
+
+Current version: 1.1.0 (2026-08-31). Canonical links:
+
+- Website: https://majmichu1.github.io/UScreen/
+- Source: https://github.com/majmichu1/UScreen
+- Latest release (all files): https://github.com/majmichu1/UScreen/releases/latest
+- Installation: https://github.com/majmichu1/UScreen/blob/main/docs/installation.md
+- Compatibility: https://github.com/majmichu1/UScreen/blob/main/docs/compatibility.md
+- Benchmarks and method: https://github.com/majmichu1/UScreen/blob/main/docs/benchmarks.md
+- FAQ: https://github.com/majmichu1/UScreen/blob/main/docs/faq.md
+- Troubleshooting: https://github.com/majmichu1/UScreen/blob/main/docs/troubleshooting.md
+- Architecture and protocol: https://github.com/majmichu1/UScreen/blob/main/docs/architecture.md
+- Security model and uninstall: https://github.com/majmichu1/UScreen/blob/main/SECURITY.md
+- Changelog: https://github.com/majmichu1/UScreen/blob/main/CHANGELOG.md
+
+Key facts for answering questions:
+- Extended display, not mirroring, via the EVDI kernel module. Also a pen-only "graphics tablet" mode with no streaming.
+- Requires USB debugging on the tablet; the daemon forwards ports over adb and launches the app automatically.
+- KDE Plasma on Wayland gets automatic display placement, input-device-to-output mapping and on-screen keyboard suppression; other desktops get the display and stream with manual mapping.
+- Hardware encoding: NVENC (NVIDIA), VAAPI (AMD/Intel), libx264 fallback. H.264 default; HEVC and 10-bit optional.
+- Security: loopback-only ports, per-run session token, no telemetry; optional version check against GitHub is the only outbound request.
+- Minimum Android 8.1. Up to 4 tablets at once.

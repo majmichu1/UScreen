@@ -24,7 +24,7 @@
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="UScreen"
+        android:label="UScreen Display"
         android:supportsRtl="true"
         android:theme="@style/Theme.UScreen"
         android:usesCleartextTraffic="true"

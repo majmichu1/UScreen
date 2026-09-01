@@ -1,0 +1,19 @@
+name: Feature request
+description: Something UScreen should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation, not the solution — there may be a simpler way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to see?
+  - type: textarea
+    id: context
+    attributes:
+      label: Hardware and setup this matters for

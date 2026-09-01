@@ -1,572 +1,188 @@
-# UScreen — USB Second Screen for Linux
+# UScreen for Linux — Android Tablet as a USB Second Monitor
 
-Turn your Android tablet into a low-latency secondary display for Linux, connected via USB.
+**UScreen is an open-source SuperDisplay alternative for Linux.** It turns an
+Android 8.1+ tablet into a real extended USB display and a pressure-sensitive
+graphics tablet, with touch, S Pen pressure, tilt, eraser and stylus-button
+support.
 
-Inspired by SuperDisplay for Windows. Built for Linux (Bazzite, Fedora, Arch, etc.).
+UScreen uses a direct ADB-over-USB connection — no Wi-Fi, USB tethering,
+dummy HDMI plug or cloud account required. Nothing leaves the cable.
 
-> **Status:** tested on Bazzite (KDE Plasma, NVIDIA) with a Samsung Galaxy Tab S9 Ultra.
-> It should work with any Android 8+ tablet (auto-resolution) and any distro with the
-> `evdi` kernel module — reports and PRs welcome!
+Tested on Bazzite (KDE Plasma, Wayland, NVIDIA) with a Samsung Galaxy Tab S9
+Ultra. Packages and installation instructions cover Bazzite, Fedora,
+Ubuntu/Debian, Arch Linux and openSUSE.
 
-## Features
+[**Download the latest release**](https://github.com/majmichu1/UScreen/releases/latest)
+· [Install](#quick-install)
+· [Compatibility](docs/compatibility.md)
+· [Benchmarks](docs/benchmarks.md)
+· [FAQ](#faq)
+· [Website](https://majmichu1.github.io/UScreen/)
 
-- **Plug and play**: the daemon watches for the tablet over ADB — plug in the USB cable and the app launches on the tablet automatically
-- **Any tablet**: the app reports its screen size and the virtual display is generated to match (auto-resolution), or pick a custom resolution in the GUI
-- **Low latency**: event-driven EVDI capture, hardware encoding, IDR-aware frame skipping — the pipeline never lets latency accumulate
-- **Settings UI on both sides**: a desktop GUI (`uscreen-gui`) on Linux, and a settings sheet in the Android app (bitrate / fps changes apply live, no reconnect needed)
-- **Touch & S-Pen** forwarded back to Linux with pressure and tilt
-- **Tray icon** on the desktop: connection state at a glance, and the mode switch without opening anything
-- **Either side of the desktop**: the virtual screen can sit right, left, above or below your real ones
-- **Wi-Fi fallback** when the cable is not an option, with the cost stated rather than glossed over
+## Why UScreen?
 
-## Install (releases)
+- **A real second monitor, not a mirror.** A virtual display is created
+  through the EVDI kernel module; the tablet appears in your display settings
+  and you move windows onto it.
+- **Pen that works like a tablet.** Pressure, tilt, eraser and button arrive
+  in Linux as a graphics-tablet device — Krita, GIMP and Blender see a tablet.
+  A one-tap *graphics tablet* mode uses the pen on your own screen with zero
+  display latency.
+- **Low latency, measured.** About 22 ms median end-to-end over USB with
+  H.264, 15–18 ms with HEVC, on the reference hardware — the
+  [numbers and the method](docs/benchmarks.md) are published.
+- **Plug in and it works.** The daemon starts with your desktop, finds the
+  tablet over adb, launches the app on it and sizes the display to its panel.
+- **Private by construction.** Loopback-only ports guarded by a per-session
+  token, no telemetry, no account. See [SECURITY.md](SECURITY.md).
+- **Honest about its edges.** Wi-Fi is a fallback and the stutter is
+  [quantified](docs/benchmarks.md#usb-vs-wi-fi-h264-quiet-link); KDE gets the
+  full automation, other desktops get the display and manual mapping.
 
-Every release ships:
+## Quick install
 
-| file | for |
+**1. Linux side** — pick the file for your distribution from the
+[latest release](https://github.com/majmichu1/UScreen/releases/latest):
+
+| file | distribution |
 | --- | --- |
-| `uscreen_<ver>_amd64.deb` | Debian, Ubuntu, Mint, Pop — `sudo apt install ./uscreen_*.deb` pulls `evdi-dkms`, `libevdi1`, `ffmpeg` and `adb` for you |
-| `uscreen-<ver>-1.x86_64.rpm` | openSUSE (`zypper install ./uscreen-*.rpm`). Fedora: enable RPM Fusion first (`ffmpeg` is not in the stock repos, so the rpm's dependency cannot resolve without it), then `dnf install --allowerasing ./uscreen-*.rpm`, then build evdi from source — it is not packaged there |
-| `uscreen-<ver>-PKGBUILD.tar.gz` | Arch and derivatives — extract, `makepkg -si`; pulls `evdi-dkms` from the AUR (same files live in `packaging/arch/`) |
-| `uscreen-<ver>-linux-x86_64.tar.gz` | anything else — extract, run `./scripts/install.sh` |
-| `uscreen.apk` | the tablet |
+| `uscreen_<ver>_amd64.deb` | Debian 12+, Ubuntu 22.04+, Mint, Pop — `sudo apt install ./uscreen_*.deb` |
+| `uscreen-<ver>-1.x86_64.rpm` | openSUSE (`zypper install`), Fedora (RPM Fusion first, then `dnf install --allowerasing`) |
+| `uscreen-<ver>-PKGBUILD.tar.gz` | Arch and derivatives — extract, `makepkg -si` |
+| `uscreen-<ver>-linux-x86_64.tar.gz` | Bazzite, Nobara, anything else — extract, `./scripts/install.sh` |
 
-The Linux binaries are built against Debian 12's glibc (2.36), so they run on
-any distribution released since. Earlier releases were built on a rolling
-system and needed glibc 2.43, which nothing but Arch and Fedora had — if you
-downloaded 1.0.x on Debian or Ubuntu and got `GLIBC_2.43' not found`, that was
-why.
+Then `systemctl --user enable --now uscreen` (the tarball installer does this
+for you). Full details, including what the installer changes on the system,
+in [docs/installation.md](docs/installation.md).
 
-The helper ships with its own copy of libevdi (LGPL-2.1, from DisplayLink's
-upstream, unmodified) next to it, found through an `$ORIGIN` rpath — so the
-only thing your system has to provide is the evdi kernel module. Debian 12 has
-no libevdi package at all, and this is what makes the tarball and the .deb work
-there.
+**2. Tablet** — install `uscreen.apk` and enable USB debugging (Settings →
+Developer options).
 
-After installing a package, enable the daemon for your login session:
+**3. Plug in.** The daemon forwards the ports, launches the app and the
+tablet shows up as a monitor. `uscreen doctor` diagnoses anything that is off.
 
-```bash
-systemctl --user enable --now uscreen
-```
+Update both halves together: since 1.1.0 they share a session token.
 
+If UScreen replaced a second monitor for you, a star on the repo and a
+[compatibility report](https://github.com/majmichu1/UScreen/issues/new?template=compatibility.yml)
+help the next Linux user find it.
 
-## How it works
+## Verified compatibility
 
-1. A **virtual display** is created on the Linux host via EVDI (no dummy plug needed)
-2. The EVDI helper captures the virtual display framebuffer (event-driven `request_update`/`grab_pixels` cycle at the target fps)
-3. The raw frames are piped to `ffmpeg` for **hardware-accelerated encoding** (NVENC on NVIDIA, VAAPI on AMD/Intel, or libx264)
-4. Encoded H.264 frames are streamed over **USB** via ADB reverse tunnel
-5. The Android app decodes and displays the stream using **hardware decoding** (MediaCodec)
-6. Touch and S-Pen events are sent back over WebSocket and injected via **uinput**
+| host | tablet | result |
+| --- | --- | --- |
+| Bazzite, KDE Plasma 6 Wayland, NVIDIA RTX 5060 | Galaxy Tab S9 Ultra, Android 14 | works — reference setup, all benchmarks |
+| Arch Linux, KDE Plasma Wayland | — | works ([#2](https://github.com/majmichu1/UScreen/issues/2)) |
+| Debian 12 · Fedora 42 · openSUSE Tumbleweed | — | packages install and run (container-tested, no tablet) |
 
-## Prerequisites
+Any Android 8.1+ tablet with a hardware H.264 decoder should work — the
+display is generated to match the tablet. More in
+[docs/compatibility.md](docs/compatibility.md); reports are welcome.
 
-- **Linux** with Wayland (KDE Plasma recommended) or X11
-- **Android tablet** (Samsung Galaxy Tab S9 Ultra tested, any Android 8+ works)
-- **USB cable** (USB 3.0+ for best performance)
-- **EVDI kernel module** (`sudo modprobe evdi`)
-- **ffmpeg** with your preferred encoder
+## Performance
 
-### Where the packages come from
+Measured on the reference hardware over USB (2960×1848, 90 fps target,
+constant-quality encoding):
 
-`scripts/install.sh` handles this, but the picture differs enough between
-distributions to be worth writing down. Checked on each of them, not from
-memory:
+| | median | p95 |
+| --- | --- | --- |
+| H.264, NVENC | 18–22 ms | 23–31 ms |
+| HEVC, NVENC | 15–18 ms | 20–23 ms |
+| Wi-Fi fallback (H.264) | 22.8 ms | 78.6 ms, worst frames in seconds |
 
-| | ffmpeg | adb | evdi |
-| --- | --- | --- | --- |
-| **Arch** | `ffmpeg` | `android-tools` | **AUR only**: `yay -S evdi-dkms` |
-| **Debian / Ubuntu** | `ffmpeg` | `adb` | `evdi-dkms` + `libevdi1` |
-| **Fedora** | needs RPM Fusion, and `--allowerasing` to replace `ffmpeg-free` | `android-tools` | **not packaged** — build from [DisplayLink/evdi](https://github.com/DisplayLink/evdi) |
-| **openSUSE** | `ffmpeg` | `android-tools` | `evdi` + `libevdi1` |
-| **Bazzite / Nobara** | in the image | `android-tools` | in the image |
+The tablet's hardware decoder is most of the budget (~15 ms), the USB hop
+5–7 ms, the encoder under 1 ms. Method, CPU figures and limitations in
+[docs/benchmarks.md](docs/benchmarks.md).
 
-Note for Debian: the runtime library is `libevdi1`. There is no `libevdi0`
-package, and `libevdi0-dev` is only a transitional one.
+## Compared with the alternatives
 
-### If the daemon keeps saying "Failed to start helper"
+Checked against each project's own documentation in August 2026; corrections
+welcome.
 
-The helper needs an EVDI device to exist, and creating one means writing to
-`/sys/devices/evdi/add`, which only root can do. Check `cat
-/sys/devices/evdi/count` — if it says 0:
-
-```bash
-# for this boot
-echo 1 | sudo tee /sys/devices/evdi/add
-
-# for every boot
-echo 'options evdi initial_device_count=2' | sudo tee /etc/modprobe.d/uscreen-evdi.conf
-sudo modprobe -r evdi && sudo modprobe evdi
-```
-
-The `modprobe -r` matters: `initial_device_count` is only read when the module
-loads, so writing the file does nothing on its own if evdi is already loaded.
-`uscreen doctor` checks all of this and prints the commands for you.
-
-## Quick Start
-
-### 1. Install dependencies
-
-```bash
-# Run the installer:
-./scripts/install.sh
-
-# Or manually:
-# Bazzite/Fedora:
-sudo dnf install ffmpeg android-tools evdi-dkms libevdi-devel libdrm-devel
-
-# Ubuntu/Debian:
-sudo apt install ffmpeg android-tools-adb evdi-dkms libevdi-dev libdrm-dev
-
-# Arch:
-sudo pacman -S ffmpeg android-tools evdi
-```
-
-### 2. Build
-
-```bash
-make build
-```
-
-This builds both the EVDI helper (C) and the Rust daemon.
-
-### 3. Install (optional)
-
-```bash
-make install
-```
-
-Copies binaries to `~/.local/bin/` and installs the systemd user service.
-
-### 4. Install the Android app
-
-Open the `android/` directory in Android Studio and build the APK, or:
-
-```bash
-cd android
-./gradlew assembleDebug
-adb install app/build/outputs/apk/debug/app-debug.apk
-```
-
-### 5. Connect
-
-```bash
-# 1. Enable USB debugging on your tablet (Settings → Developer Options)
-# 2. Have UScreen start with your desktop, so plugging in is all it takes
-#    (or tick "Start UScreen with the desktop" in uscreen-gui):
-systemctl --user enable --now uscreen.service
-# ...or start it just for this session:
-uscreen start
-# 3. Plug in the USB-C cable — that's it.
-#    The daemon forwards the ADB ports and launches the app on the tablet.
-```
-
-If auto-forward fails, run manually:
-```bash
-adb reverse tcp:8890 tcp:8890
-adb reverse tcp:8891 tcp:8891
-```
-
-## Security
-
-Both ports (video 8890, input 8891) bind to loopback only and the tablet
-reaches them through `adb reverse`. Since 1.1.0 that is not the whole story:
-
-- **Session token.** The daemon generates a random token per run and hands it
-  to the app as an intent extra when it launches it over adb. A client that
-  does not present it first gets no video and cannot inject input. Without
-  this, any process on the machine — or any other app on the tablet — could
-  connect to the loopback ports, read the screen and drive the mouse. If you
-  start the app by hand it will be dropped once, and the daemon immediately
-  relaunches it with the token. `require_token = false` in the config turns
-  this off, for an app older than 1.1.0.
-- **Capture FIFO** lives in `$XDG_RUNTIME_DIR/uscreen/` with mode 0600. It used
-  to be `/tmp/uscreen_capture.fifo` with mode 0666, which let any local
-  account read the raw frames — a live copy of the screen.
-- WebSocket messages are capped at 64 KiB.
-
-## Updates
-
-The daemon asks GitHub once a day whether a newer release exists and says so
-in the tray icon and in `uscreen doctor`. The app checks when you open its
-settings sheet. Neither installs anything: on Linux that is your package
-manager's job, and Android always asks before installing a sideloaded APK.
-`check_updates = false` turns the daemon's check off.
+| | UScreen | [SuperDisplay](https://superdisplay.app/) | [Weylus](https://github.com/H-M-H/Weylus) | [Sunshine](https://github.com/LizardByte/Sunshine) + Moonlight | [spacedesk](https://www.spacedesk.net/) |
+| --- | --- | --- | --- | --- | --- |
+| Linux host | **yes** | no (Windows, macOS) | yes | yes | no (Windows) |
+| Real extended display | **yes** (EVDI) | yes | needs a separate virtual-display setup | needs an existing or dummy display | yes |
+| Direct USB, no tethering | **yes** (adb) | yes | via adb port forward | no (network) | no (network) |
+| S Pen pressure | **yes** | yes | yes | partial | partial |
+| Tilt, eraser, button | **yes** | yes | pressure/tilt via browser API, no eraser | no | no |
+| Hardware video encoding | NVENC / VAAPI / x264 | yes | yes (VAAPI/NVENC) | yes | yes |
+| Open source | **MIT** | no | AGPL | GPL | no |
+| Dummy HDMI plug | **no** | no | sometimes | often | no |
 
 ## Settings
 
-Settings live in `~/.config/uscreen/config.toml` and can be changed from three places:
+Everything lives in `~/.config/uscreen/config.toml` and is reachable from
+`uscreen-gui`, the ⚙ sheet in the tablet app, the tray icon, or CLI flags.
 
-- **`uscreen-gui`** — desktop app with status (daemon / tablet), start/stop, and all settings
-- **The tablet app** — tap the ⚙ handle in the top-right corner; bitrate and fps apply live
-- **CLI flags** — override the config file for one run (e.g. `uscreen --bitrate 30000 start`)
-- **The tray icon** — mode switch, settings, quit
+- **Graphics tablet mode** — flip *Graphics tablet* on the tablet: nothing is
+  streamed, the pen drives your own screen, zero display latency. Switch back
+  the same way; no restart.
+- **Position** — `right` (default), `left`, `above`, `below` your real screens.
+- **Codec** — `h264_nvenc` by default because every device decodes it;
+  `hevc_nvenc` is sharper at the same bitrate and was faster on the reference
+  tablet. `ten_bit` (HEVC Main10) smooths gradient banding — the desktop is
+  8-bit, so it adds precision, not colour; it is not HDR.
+- **Stream scale** — `stream_scale = 2` sends a quarter of the pixels for a
+  ~6 ms lower decode time at the cost of softer text.
+- **Several tablets** — `max_tablets` up to 4, each its own screen.
+- **Wi-Fi** — `adb tcpip 5555` and `adb connect <ip>:5555`; the daemon
+  prefers the cable when both are there.
+- **Updates** — the app, the GUI and the tray tell you when a newer release
+  exists; nothing installs itself. `check_updates = false` turns it off.
 
-### More than one tablet
+## FAQ
 
-`max_tablets` (default 1, up to 4) lets several tablets attach at once, each
-as its own virtual screen with its own pen and touch devices. Every slot needs
-an EVDI device of its own; the installer and the packages set
-`initial_device_count=2`, and `uscreen doctor` says if more are needed.
+**Does it need Wi-Fi or USB tethering?** No — USB with USB debugging. Wi-Fi
+is an optional fallback.
 
-The second tablet uses ports 8892/8893 on the host (the base ports plus two
-per slot); on the tablet side nothing changes, `adb reverse` maps them per
-device. Tested with one real tablet plus a loopback stand-in
-(`scripts/fake-tablet.py` with `USCREEN_FAKE_TABLET=…`), not yet with two
-physical tablets.
+**Is it a mirror or an extension?** An extension; a real monitor in your
+display settings. Graphics-tablet mode is a separate, non-display mode.
 
-### Where the screen sits
+**Does S Pen pressure and tilt work?** Yes, plus eraser and button, as a
+proper tablet device.
 
-`position` places the virtual screen `right` (default), `left`, `above` or
-`below` everything else. Above and left move the rest of the desktop to make
-room, in one atomic reconfiguration, because KDE will not accept a negative
-position — it reports success and quietly leaves the output disabled.
+**Does it work on Bazzite / KDE Wayland?** That is the reference setup.
+GNOME and X11 get the display and the stream; input mapping is manual there.
 
-### Codec
+**Does it need a dummy HDMI plug?** No.
 
-H.264 is the default because every device decodes it. If your tablet has a
-hardware HEVC decoder — `uscreen doctor` will tell you — `hevc_nvenc` is worth
-switching to: sharper text at the same bitrate, and on a Tab S9 Ultra it
-measured slightly *faster* than H.264 (p50 15-18ms against 18-22ms), because
-the tablet has a dedicated low-latency HEVC decoder.
+**Which Android versions?** 8.1 and newer.
 
-With HEVC you can also turn on `ten_bit`, which encodes Main10. Be clear about
-what that is and is not: **the captured desktop is 8-bit and cannot be
-otherwise** — EVDI hands over ARGB8888 and there is no 10-bit path below us —
-so this adds no colour. What it buys is precision in the encoder's own
-arithmetic, which smooths the banding that shows on gradients at low bitrates.
-It is not HDR, and it is not a step towards it while the capture stays 8-bit.
-Measured cost on the tablet: none.
+**Is anything sent to the cloud?** No. The only outbound request is an
+optional version check against GitHub.
 
-### Over Wi-Fi
+**How do I uninstall it completely?** [SECURITY.md](SECURITY.md#how-to-uninstall-completely)
+lists every file.
 
-The pipeline is not tied to USB — it speaks to whatever adb is connected to.
-So `adb tcpip 5555` followed by `adb connect <tablet-ip>:5555` is all it takes,
-and the daemon prefers the cable automatically whenever both are available.
+More in [docs/faq.md](docs/faq.md).
 
-It is a fallback, and the numbers say why. Measured on a quiet 5GHz/6GHz link
-with excellent signal on both ends:
+## Documentation
 
-| | USB | Wi-Fi |
-| --- | --- | --- |
-| median latency | 22.0ms | 22.8ms |
-| median p95 | 25.3ms | 78.6ms |
-| worst frame seen | 32ms | 2546ms |
-
-The median is fine. The tail is not, and no amount of signal strength fixes it
-— those figures are already from a link with none of the usual excuses. Use it
-when the cable is not an option, not instead of the cable.
-
-(The app holds a low-latency Wi-Fi lock while streaming. Without it the median
-was 32.0ms rather than 22.8ms: Android dozes the radio between frames, and a
-stream of small packets sixty times a second is the traffic pattern power save
-handles worst.)
-
-### On-screen keyboard
-
-The tablet's touch device is a real touchscreen as far as the desktop is
-concerned, so KDE would pop its virtual keyboard up over whatever you are
-working on. The daemon turns it off while it runs and puts the setting back on exit —
-including after being killed rather than stopped, since the previous value is
-saved to disk rather than kept in memory.
-
-Worth knowing if you go looking: writing `VirtualKeyboardMode` into `kwinrc`
-does not work. KWin does not re-read that file, so the value on disk and the
-one actually in force disagree, and the keyboard keeps appearing. The property
-on `org.kde.kwin.VirtualKeyboard` over D-Bus is what takes effect.
-
-### Graphics tablet mode
-
-The tablet stops being a second screen and becomes a drawing surface for the
-screen you are already looking at, like a Wacom Intuos. Nothing is captured,
-encoded or streamed, and the pen is mapped onto your own display instead of the
-virtual one.
-
-For drawing this removes display latency from the loop entirely — you watch the
-host's screen, which has none — and with nothing being captured or encoded the
-pipeline costs next to nothing. Pressure, tilt, the eraser and the stylus
-button all work exactly as they do in display mode.
-
-**Switch it from the tablet.** Tap the ⚙ in the corner and flip *Graphics
-tablet*; the change takes effect immediately, with no restart and no trip to
-the computer. The host tears the virtual display down, moves the pen onto your
-own screen and stops encoding — and puts it all back when you switch off. The
-mode is remembered, so the tablet comes back the way you left it.
-
-It is also settable from the host, as a checkbox in `uscreen-gui` or with
-`--pen-only`. The flag applies to that run only; a switch made from the tablet
-is a deliberate choice and is written to the config file.
-
-### Stream detail vs latency
-
-The desktop always runs at full resolution. `stream_scale` controls only what
-is sent to the tablet: at `2` a quarter of the pixels are transmitted and the
-tablet upscales them by a whole number. The tablet's decoder costs roughly
-7-8 ms fixed plus 1.2 ms per megapixel, so fewer pixels reach the screen
-sooner — worth it for games, softer for text.
-
-### Resolution
-
-By default `auto_resolution = true`: the tablet app reports its native screen
-size when it connects and the host regenerates the virtual display (EDID) to
-match — any tablet works out of the box. Untick "Auto" in the GUI to force a
-custom resolution (e.g. a lower one for weaker hardware).
-
-## Building a release APK
-
-```bash
-cd android
-keytool -genkeypair -keystore uscreen-release.keystore -alias uscreen \
-        -keyalg RSA -keysize 2048 -validity 10000
-# create keystore.properties with: storeFile / storePassword / keyAlias / keyPassword
-./gradlew assembleRelease   # → app/build/outputs/apk/release/app-release.apk
-```
-
-`keystore.properties` and the keystore are gitignored — keep them safe; the
-same key must sign every future update.
-
-## Releasing (maintainers)
-
-```bash
-make dist   # → dist/uscreen-<version>-linux-x86_64.tar.gz + dist/.../uscreen.apk
-```
-
-Upload both files to a GitHub release.
-
-## Building with the in-process encoder (optional)
-
-By default the daemon pipes raw frames into an `ffmpeg` child process, which
-needs no build-time dependencies beyond Rust and gcc. The `inproc-encoder`
-feature encodes through libavcodec instead, removing that process boundary:
-
-```bash
-cargo build --release --features inproc-encoder
-```
-
-Measured on a Tab S9 Ultra at 2960x1848, same settings both ways:
-
-| | ffmpeg process | in-process |
-|---|---|---|
-| Latency p50 | 22.2-23.1 ms | 22.0-22.9 ms |
-| Pipeline CPU | ~188% | **~97%** |
-
-Latency is unchanged, and that is expected: the budget is dominated by the
-tablet's decoder (~15 ms) and the USB hop (~7 ms), neither of which the encoder
-sits in front of. What it buys is roughly a whole CPU core back, and the ability
-to ask for a keyframe on demand — so a client attaching to a mostly-static
-screen gets a picture at once instead of waiting for the scheduled one.
-
-It needs the ffmpeg development headers (`ffmpeg-devel` on Fedora,
-`libavcodec-dev libavformat-dev libavutil-dev` on Debian/Ubuntu). On atomic
-distributions such as Bazzite or Silverblue, where layering development
-packages is awkward, build inside a container instead — the resulting binary
-links against the host's ffmpeg libraries and runs on the host unchanged:
-
-```bash
-distrobox create --name uscreen-tools --image registry.fedoraproject.org/fedora:latest
-distrobox enter uscreen-tools -- sudo dnf install -y \
-    libavcodec-free-devel libavutil-free-devel libavformat-free-devel \
-    libswscale-free-devel libswresample-free-devel libavfilter-free-devel \
-    libavdevice-free-devel clang gcc
-distrobox enter uscreen-tools -- cargo build --release --features inproc-encoder
-```
-
-The `-free` headers are fine here: they declare the same API, and at runtime the
-binary uses whichever ffmpeg the host has installed.
-
-One limitation: the in-process encoder feeds libavcodec NV12 straight from the
-FIFO, with no conversion step to hang 10-bit on, so `ten_bit` does nothing
-there. The daemon says so on startup rather than ignoring it quietly. Use the
-default build for 10-bit.
-
-## Performance Tuning
-
-### NVIDIA GPUs (NVENC) — recommended
-```bash
-uscreen --encoder h264_nvenc --bitrate 30000 --fps 60
-```
-
-### AMD/Intel GPUs (VAAPI)
-```bash
-uscreen --encoder h264_vaapi --bitrate 20000 --fps 60
-```
-
-### CPU only (libx264)
-```bash
-uscreen --encoder libx264 --bitrate 15000 --fps 30
-```
-
-## CLI Options
-
-```
-USAGE: uscreen [OPTIONS] [COMMAND]
-
-COMMANDS:
-  start           Start the uscreen daemon
-  stop            Stop the uscreen daemon
-  status          Show daemon status
-  list-displays   List available displays
-  doctor          Diagnose the setup and report what is wrong
-
-OPTIONS (all default to ~/.config/uscreen/config.toml):
-  --encoder <ENCODER>     H.264 encoder: h264_nvenc, h264_vaapi, libx264
-  --fps <FPS>             Frame rate
-  --bitrate <BITRATE>     Bitrate in kbps
-  --width <WIDTH>         Capture width
-  --height <HEIGHT>       Capture height
-  --video-port <PORT>     Video stream port
-  --input-port <PORT>     Input WebSocket port
-  --quality <Q>           Constant-quality target (12-32, lower = sharper)
-  --stream-scale <N>      Downscale the stream only (1 = native, 2 = half)
-  --helper <PATH>         Path to evdi_helper binary
-  --edid <PATH>           Path to EDID binary
-```
-
-## Project Structure
-
-```
-uscreen/
-├── host/              # Rust daemon (capture, encode, stream, input injection)
-│   ├── src/
-│   │   ├── main.rs    # CLI, orchestration, plug-and-play ADB monitor
-│   │   ├── capture.rs # EVDI helper + ffmpeg management, live settings restart
-│   │   ├── stream.rs  # TCP video server, IDR-aware backlog skipping
-│   │   ├── input.rs   # WebSocket input server + uinput injection + config channel
-│   │   ├── config.rs  # ~/.config/uscreen/config.toml
-│   │   ├── latency.rs # End-to-end latency measurement
-│   │   ├── doctor.rs  # `uscreen doctor` diagnostics
-│   │   └── vdisplay.rs # EVDI discovery via sysfs
-│   ├── evdi/          # C helper for EVDI framebuffer capture
-│   └── Cargo.toml
-├── gui/               # Linux desktop GUI (egui): status, start/stop, settings
-├── android/           # Android app (Kotlin/Compose)
-│   └── app/src/main/java/com/uscreen/
-│       ├── MainActivity.kt    # Fullscreen UI, settings sheet, stats overlay
-│       ├── VideoReceiver.kt   # TCP client + MediaCodec decoder (render thread)
-│       ├── TouchCapture.kt    # Touch/S-Pen capture + WebSocket + config push
-│       └── Prefs.kt           # Persisted tablet-side settings
-├── edid/              # Custom EDID files
-├── scripts/           # Setup and automation
-│   ├── install.sh     # Dependency installer
-│   ├── gen-edid.py    # EDID generator for custom resolutions
-│   ├── uscreen.desktop    # App menu entry for the GUI
-│   └── uscreen.service    # systemd user service
-└── Makefile
-```
-
-## Protocol
-
-### Video Stream (TCP 8890, loopback only)
-- **Length-prefixed packets**: 4-byte big-endian length, then a 1-byte type
-  (`0` = codec config, `1` = frame)
-- Frame packets carry a 4-byte big-endian sequence number before the payload.
-  The tablet passes it through the decoder as the presentation timestamp and
-  echoes it back on the input socket once the frame is on screen, which is how
-  end-to-end latency is measured on a single clock.
-- The first packet sent to a new client contains **SPS+PPS** codec configuration
-- Frame data is in Annex B format (with start codes)
-
-### Input Stream (WebSocket 8891)
-- **JSON messages** with the following format:
-
-**Touch event:**
-```json
-{"type":"touch","x":0.5,"y":0.3,"pressure":1.0,"action":0,"slot":0}
-```
-Actions: 0=DOWN, 1=UP, 2=MOVE. Coordinates are normalized (0.0-1.0).
-
-**Pen/S-Pen event:**
-```json
-{"type":"pen","x":0.5,"y":0.3,"pressure":0.8,"tilt_x":0.2,"tilt_y":0.1,"action":2}
-```
-
-## Troubleshooting
-
-### "Failed to open /dev/uinput"
-
-On a stock system `/dev/uinput` is root-only. The installer and the packages
-put a udev rule in place that opens it to the logged-in user (`TAG+="uaccess"`,
-the same mechanism the desktop uses for the keyboard). If you installed some
-other way:
-
-```bash
-sudo modprobe uinput
-sudo install -Dm644 packaging/60-uscreen-uinput.rules /etc/udev/rules.d/60-uscreen-uinput.rules
-sudo udevadm control --reload && sudo udevadm trigger --name-match=uinput
-```
-
-### "EVDI device did not appear"
-```bash
-sudo modprobe evdi
-# Check: ls /dev/dri/card*
-```
-
-### Black screen on tablet
-1. Ensure the EVDI helper is running (`uscreen status`)
-2. Check encoder output: `RUST_LOG=uscreen=debug uscreen start`
-3. Verify ADB forwarding: `adb reverse --list`
-
-### Touch events not working
-- Ensure `/dev/uinput` is accessible (may need `sudo` or udev rule)
-- Check: `ls -la /dev/uinput`
+- [Installation](docs/installation.md) · [Troubleshooting](docs/troubleshooting.md)
+- [Architecture and protocol](docs/architecture.md) · [Development, building, releasing](docs/development.md)
+- [Benchmarks](docs/benchmarks.md) · [Compatibility](docs/compatibility.md) · [FAQ](docs/faq.md)
+- [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 ## Roadmap
 
-### Shipped
+Shipped: extended display over USB, S Pen with pressure/tilt/eraser, graphics-
+tablet mode switchable from the tablet, plug-and-play with autostart, tray
+icon, any-side placement, several tablets, HEVC and 10-bit, Wi-Fi fallback,
+packages for five distribution families, `uscreen doctor`, measured latency.
 
-- [x] Core streaming pipeline (capture → encode → stream → decode)
-- [x] Android app with MediaCodec rendering
-- [x] Touch/S-Pen event capture and WebSocket transmission
-- [x] uinput injection (touch → actual input in Linux)
-- [x] Proper SPS/PPS codec config handling
-- [x] Fullscreen immersive mode
-- [x] Plug-and-play: ADB monitor with auto port forwarding + app launch
-- [x] Event-driven EVDI capture (request_update/grab cycle at full fps)
-- [x] Linux GUI (uscreen-gui) with status and settings
-- [x] Android settings UI (bitrate/fps applied live)
-- [x] Persistent config (~/.config/uscreen/config.toml)
-- [x] Auto-create virtual display at tablet resolution
-- [x] Touch/S-Pen mapped to the virtual display, not the whole desktop
-- [x] `uscreen doctor` diagnostics
-- [x] End-to-end latency measurement
-- [x] Starts with the desktop — plug the cable in and it works
-- [x] Stream downscaling for lower decode latency (`stream_scale`)
-- [x] Optional in-process encoder (libavcodec instead of an ffmpeg process)
-- [x] Graphics tablet mode (pen drives the host's own screen)
-- [x] On-screen keyboard kept out of the way in both modes
-- [x] Switching between the two modes from the tablet, without a restart
-- [x] System tray icon: state, mode switch, settings, quit
-- [x] Wi-Fi as a fallback transport, with the cost measured and stated
-- [x] Virtual screen on any side of the desktop
-- [x] HEVC, and 10-bit encoding on top of it
-
-### Next
-
-- [x] **Several tablets at once**, each as its own virtual screen
-      (`max_tablets`). Verified with one tablet plus a loopback stand-in;
-      a report from anyone with two real tablets would be welcome.
-- [ ] **AOA transport.** Would remove the USB debugging requirement, which is
-      the last thing between this and simply plugging a cable in.
-
-### Being explored
-
-- [ ] **HDR.** Blocked below us, and not by bandwidth — 10-bit costs perhaps a
-      quarter more bits, which a lower frame rate would more than pay for. The
-      problem is that EVDI hands over 8-bit ARGB, so there is nothing 10-bit to
-      capture in the first place; `ten_bit` above encodes an 8-bit desktop in
-      10 bits, which is a different thing entirely. Real HDR would take EVDI
-      growing a 10-bit format, and HDR metadata in the generated EDID. Worth
-      noting that `uscreen doctor` currently asks you to turn the tablet's
-      colour enhancements *off*, for accuracy.
+Next: **AOA transport** — removing the USB-debugging requirement, the last
+step between this and simply plugging a cable in. Explored: HDR, currently
+blocked by EVDI providing only 8-bit framebuffers.
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Commit your changes (`git commit -am 'Add my feature'`)
-4. Push to the branch (`git push origin feature/my-feature`)
-5. Open a Pull Request
+Compatibility reports are the most useful thing right now; see
+[CONTRIBUTING.md](CONTRIBUTING.md). Issues tagged `good first issue` are
+self-contained. Questions go to
+[Discussions](https://github.com/majmichu1/UScreen/discussions).
 
 ## License
 
-MIT
+MIT. The bundled libevdi client library is LGPL-2.1 from DisplayLink,
+unmodified — see [LICENSE](LICENSE).

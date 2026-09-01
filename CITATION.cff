@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you refer to this software, please cite it as below."
+title: "UScreen for Linux"
+abstract: "Open-source SuperDisplay alternative for Linux: an Android tablet as a USB second monitor and graphics tablet with S Pen pressure and tilt."
+authors:
+  - name: "majmichu1"
+repository-code: "https://github.com/majmichu1/UScreen"
+url: "https://majmichu1.github.io/UScreen/"
+license: MIT
+version: "1.1.0"
+date-released: "2026-08-31"
+keywords:
+  - linux
+  - android
+  - second monitor
+  - virtual display
+  - graphics tablet
+  - S Pen
+  - EVDI
+  - Wayland
