@@ -73,7 +73,7 @@ help the next Linux user find it.
 | host | tablet | result |
 | --- | --- | --- |
 | Bazzite, KDE Plasma 6 Wayland, NVIDIA RTX 5060 | Galaxy Tab S9 Ultra, Android 14 | works — reference setup, all benchmarks |
-| Arch Linux, KDE Plasma Wayland | — | works — externally verified on a real system after the v1.0.2 installer/EVDI fixes; the app connected and ran ([report](https://github.com/majmichu1/UScreen/issues/2#issuecomment-5478643599)). The 1.1.0 PKGBUILD itself is not yet verified there ([#3](https://github.com/majmichu1/UScreen/issues/3)) |
+| Arch Linux, KDE Plasma Wayland | — | works — externally verified on a real system twice: the v1.0.2 installer ([report](https://github.com/majmichu1/UScreen/issues/2#issuecomment-5478643599)) and the v1.1.0 PKGBUILD via `makepkg -si`, with menu entry, tray and settings working out of the box ([report](https://github.com/majmichu1/UScreen/issues/3#issuecomment-5494961262)) |
 | Debian 12 · Fedora 42 · openSUSE Tumbleweed | — | packages install and run (container-tested, no tablet) |
 
 Any Android 8.1+ tablet with a hardware H.264 decoder should work — the
