@@ -6,12 +6,16 @@
 <title>UScreen for Linux — Android Tablet as a USB Second Monitor with S Pen Support</title>
 <meta name="description" content="UScreen is an open-source SuperDisplay alternative for Linux: turn an Android tablet into a real extended USB display and graphics tablet with S Pen pressure and tilt. No Wi-Fi, tethering, dummy plug or cloud. KDE Plasma, Wayland, Bazzite, Fedora, Ubuntu, Arch, openSUSE.">
 <link rel="canonical" href="https://majmichu1.github.io/UScreen/">
+<meta name="theme-color" content="#141311">
 <meta property="og:type" content="website">
 <meta property="og:title" content="UScreen for Linux — Android tablet as a USB second monitor">
-<meta property="og:description" content="Open-source SuperDisplay alternative for Linux. Real extended display over USB, S Pen pressure and tilt, ~22 ms end-to-end latency measured.">
+<meta property="og:description" content="Open-source SuperDisplay alternative for Linux. Real extended display over USB, S Pen pressure and tilt, 22 ms median end-to-end latency, measured.">
 <meta property="og:url" content="https://majmichu1.github.io/UScreen/">
 <meta property="og:image" content="https://opengraph.githubassets.com/1/majmichu1/UScreen">
 <meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -36,7 +40,7 @@
     "Direct USB connection over adb, Wi-Fi as a fallback",
     "Graphics-tablet mode with zero display latency",
     "Hardware encoding (NVENC, VAAPI) and decoding, H.264 and HEVC",
-    "Measured ~22 ms median end-to-end latency over USB",
+    "Measured 22 ms median end-to-end latency over USB",
     "Packages for Debian, Ubuntu, Fedora, openSUSE, Arch, Bazzite",
     "Several tablets at once"
   ]
@@ -47,116 +51,345 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "What is the best open-source SuperDisplay alternative for Linux?",
-     "acceptedAnswer": {"@type": "Answer", "text": "UScreen for Linux turns an Android tablet into a real extended display over a USB cable, with S Pen pressure and tilt, on a Linux host. SuperDisplay itself only supports Windows and macOS hosts."}},
-    {"@type": "Question", "name": "Can an Android tablet be used as a real second monitor on Linux?",
-     "acceptedAnswer": {"@type": "Answer", "text": "Yes. UScreen creates a virtual display through the EVDI kernel module, so the tablet appears in the display settings like any monitor. It extends the desktop rather than mirroring it."}},
-    {"@type": "Question", "name": "Does UScreen require USB tethering or Wi-Fi?",
-     "acceptedAnswer": {"@type": "Answer", "text": "No. It uses the adb connection provided by USB debugging over a normal USB cable. Wi-Fi works as a fallback with more stutter."}},
-    {"@type": "Question", "name": "Does UScreen support Samsung S Pen pressure and tilt?",
-     "acceptedAnswer": {"@type": "Answer", "text": "Yes: pressure, tilt, the eraser end and the stylus button are forwarded to Linux as a graphics-tablet device, so Krita, GIMP and Blender see a real tablet."}},
-    {"@type": "Question", "name": "Does UScreen work on Bazzite and KDE Wayland?",
-     "acceptedAnswer": {"@type": "Answer", "text": "That is the reference setup. KDE Plasma on Wayland gets automatic display placement, input mapping and on-screen keyboard suppression. Other desktops get the display and the stream; input mapping is manual."}},
-    {"@type": "Question", "name": "Does UScreen require a dummy HDMI plug?",
-     "acceptedAnswer": {"@type": "Answer", "text": "No. The virtual display is created in software by the EVDI kernel module."}},
-    {"@type": "Question", "name": "What Android versions are supported?",
-     "acceptedAnswer": {"@type": "Answer", "text": "Android 8.1 and newer, on any tablet with a hardware H.264 decoder."}},
-    {"@type": "Question", "name": "Is screen or input data sent to the cloud?",
-     "acceptedAnswer": {"@type": "Answer", "text": "No. Video and input travel only between the computer and the tablet. The only outbound request is an optional check of the latest release on GitHub."}},
-    {"@type": "Question", "name": "How is UScreen different from Weylus?",
-     "acceptedAnswer": {"@type": "Answer", "text": "Weylus turns the tablet's browser into an input device and can show the screen in it; a virtual display must be set up separately. UScreen creates the virtual display itself, streams it with hardware encoding to a native app with hardware decoding, and maps the input devices onto that display automatically on KDE."}},
-    {"@type": "Question", "name": "How do I uninstall UScreen completely?",
-     "acceptedAnswer": {"@type": "Answer", "text": "Remove the package or the files in ~/.local/bin, the systemd user unit, and the three system files the installer creates (modprobe.d, modules-load.d, udev rule). The exact commands are in SECURITY.md in the repository."}}
+    {"@type": "Question", "name": "What is the best open-source SuperDisplay alternative for Linux?", "acceptedAnswer": {"@type": "Answer", "text": "UScreen for Linux turns an Android tablet into a real extended display over a USB cable, with S Pen pressure and tilt, on a Linux host. SuperDisplay itself only supports Windows and macOS hosts."}},
+    {"@type": "Question", "name": "Can an Android tablet be used as a real second monitor on Linux?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. UScreen creates a virtual display through the EVDI kernel module, so the tablet appears in the display settings like any monitor. It extends the desktop rather than mirroring it."}},
+    {"@type": "Question", "name": "Does UScreen require USB tethering or Wi-Fi?", "acceptedAnswer": {"@type": "Answer", "text": "No. It uses the adb connection provided by USB debugging over a normal USB cable. Wi-Fi works as a fallback with more stutter."}},
+    {"@type": "Question", "name": "Does UScreen support Samsung S Pen pressure and tilt?", "acceptedAnswer": {"@type": "Answer", "text": "Yes: pressure, tilt, the eraser end and the stylus button are forwarded to Linux as a graphics-tablet device, so Krita, GIMP and Blender see a real tablet."}},
+    {"@type": "Question", "name": "Does UScreen work on Bazzite and KDE Wayland?", "acceptedAnswer": {"@type": "Answer", "text": "That is the reference setup. KDE Plasma on Wayland gets automatic display placement, input mapping and on-screen keyboard suppression. Other desktops get the display and the stream; input mapping is manual."}},
+    {"@type": "Question", "name": "Does UScreen require a dummy HDMI plug?", "acceptedAnswer": {"@type": "Answer", "text": "No. The virtual display is created in software by the EVDI kernel module."}},
+    {"@type": "Question", "name": "What Android versions are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Android 8.1 and newer, on any tablet with a hardware H.264 decoder."}},
+    {"@type": "Question", "name": "Is screen or input data sent to the cloud?", "acceptedAnswer": {"@type": "Answer", "text": "No. Video and input travel only between the computer and the tablet. The only outbound request is an optional check of the latest release on GitHub."}},
+    {"@type": "Question", "name": "How is UScreen different from Weylus?", "acceptedAnswer": {"@type": "Answer", "text": "Weylus turns the tablet's browser into an input device and can show the screen in it; a virtual display must be set up separately. UScreen creates the virtual display itself, streams it with hardware encoding to a native app with hardware decoding, and maps the input devices onto that display automatically on KDE."}},
+    {"@type": "Question", "name": "How do I uninstall UScreen completely?", "acceptedAnswer": {"@type": "Answer", "text": "Remove the package or the files in ~/.local/bin, the systemd user unit, and the three system files the installer creates (modprobe.d, modules-load.d, udev rule). The exact commands are in SECURITY.md in the repository."}}
   ]
 }
 </script>
 <style>
-  :root { color-scheme: light dark; --fg:#1b1b1f; --bg:#fbfbfd; --muted:#5d5f6b; --accent:#5b5bd6; --line:#e3e3ea; }
-  @media (prefers-color-scheme: dark) { :root { --fg:#e8e8ee; --bg:#121218; --muted:#9a9ab0; --accent:#8c8cff; --line:#2a2a36; } }
-  body { margin:0; font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--fg); background:var(--bg); }
-  main { max-width: 860px; margin: 0 auto; padding: 32px 20px 64px; }
-  h1 { font-size: 2rem; line-height:1.2; margin: 0 0 12px; }
-  h2 { margin-top: 40px; border-bottom:1px solid var(--line); padding-bottom:6px; }
-  .lead { font-size: 1.15rem; }
-  .muted { color: var(--muted); }
-  .cta a { display:inline-block; margin: 8px 8px 0 0; padding: 10px 16px; border-radius: 8px; background: var(--accent); color:#fff; text-decoration:none; font-weight:600; }
-  .cta a.secondary { background: transparent; color: var(--accent); border:1px solid var(--accent); }
-  table { border-collapse: collapse; width:100%; font-size:.95rem; }
-  th, td { text-align:left; padding: 8px 10px; border-bottom:1px solid var(--line); vertical-align: top; }
-  code { background: rgba(127,127,160,.15); padding: 1px 5px; border-radius:4px; font-size:.92em; }
-  details { margin: 10px 0; } summary { cursor:pointer; font-weight:600; }
-  footer { margin-top: 48px; color: var(--muted); font-size:.9rem; }
+  :root {
+    --ink: #141311;          /* page ground: warm near-black */
+    --ink-2: #1c1b18;        /* raised panels */
+    --line: #2e2c27;
+    --line-strong: #4a4740;
+    --text: #ece8df;         /* warm paper white */
+    --text-2: #a8a399;
+    --text-3: #6f6b63;
+    --amber: #f0a742;        /* the one accent: an indicator lamp */
+    --amber-dim: #8a5f24;
+    --serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+    --sans: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --measure: 66ch;
+    --gutter: clamp(20px, 5vw, 72px);
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--ink); color-scheme: dark; }
+  body {
+    margin: 0; background: var(--ink); color: var(--text);
+    font: 400 17px/1.6 var(--sans); -webkit-font-smoothing: antialiased;
+    /* faint grain so large dark areas read as material, not void */
+    background-image:
+      radial-gradient(1200px 600px at 85% -10%, rgba(240,167,66,.07), transparent 60%),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .035 0'/></filter><rect width='160' height='160' filter='url(%23n)'/></svg>");
+  }
+  a { color: var(--amber); text-decoration: none; }
+  a:hover, a:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
+  code, .mono { font-family: var(--mono); font-size: .92em; }
+  code { color: var(--text); background: rgba(255,255,255,.05); padding: .1em .4em; border-radius: 3px; }
+
+  /* ---- top rail ---- */
+  header.rail {
+    display: flex; align-items: center; justify-content: space-between; gap: 24px;
+    padding: 18px var(--gutter); border-bottom: 1px solid var(--line);
+    font-family: var(--mono); font-size: 13px; letter-spacing: .02em; color: var(--text-2);
+  }
+  header.rail .brand { color: var(--text); font-weight: 500; }
+  header.rail .brand small { color: var(--amber); margin-left: 8px; }
+  header.rail nav a { color: var(--text-2); margin-left: 22px; }
+  header.rail nav a:hover { color: var(--text); text-decoration: none; }
+  @media (max-width: 720px) { header.rail nav { display: none; } }
+
+  /* ---- hero: asymmetric, headline left, diagram right ---- */
+  .hero {
+    display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 6fr); gap: 48px;
+    padding: clamp(48px, 8vw, 110px) var(--gutter) 40px; align-items: end;
+  }
+  @media (max-width: 900px) { .hero { grid-template-columns: 1fr; } }
+  .kicker { font-family: var(--mono); font-size: 13px; color: var(--amber); letter-spacing: .08em; text-transform: uppercase; margin: 0 0 22px; }
+  h1 {
+    font-family: var(--serif); font-weight: 400; margin: 0;
+    font-size: clamp(42px, 6.2vw, 84px); line-height: .98; letter-spacing: -.012em;
+  }
+  h1 em { font-style: italic; color: var(--amber); }
+  .lead { max-width: var(--measure); font-size: 19px; color: var(--text-2); margin: 28px 0 0; }
+  .lead strong { color: var(--text); font-weight: 500; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px; padding: 13px 20px;
+    border: 1px solid var(--amber); color: var(--amber); font-family: var(--mono); font-size: 14px;
+    border-radius: 3px; transition: background .15s, color .15s;
+  }
+  .btn.primary { background: var(--amber); color: var(--ink); font-weight: 500; }
+  .btn.primary:hover { background: #f7bd6b; text-decoration: none; }
+  .btn:hover { background: rgba(240,167,66,.12); text-decoration: none; }
+  .cta .meta { font-family: var(--mono); font-size: 12.5px; color: var(--text-3); }
+
+  /* diagram */
+  figure.topology { margin: 0; }
+  figure.topology svg { width: 100%; height: auto; display: block; }
+  figure.topology figcaption { font-family: var(--mono); font-size: 12px; color: var(--text-3); margin-top: 10px; }
+  .flow { stroke-dasharray: 6 8; animation: flow 1.6s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset: -28; } }
+  @media (prefers-reduced-motion: reduce) { .flow { animation: none; } }
+
+  /* ---- instrument strip: the numbers ---- */
+  .strip {
+    margin: 30px var(--gutter) 0; border-top: 1px solid var(--line-strong); border-bottom: 1px solid var(--line);
+    display: grid; grid-template-columns: repeat(4, 1fr);
+  }
+  @media (max-width: 900px) { .strip { grid-template-columns: repeat(2, 1fr); } }
+  .strip > div { padding: 22px 18px 20px; border-right: 1px solid var(--line); }
+  .strip > div:last-child { border-right: 0; }
+  .strip .v { font-family: var(--mono); font-size: clamp(26px, 3vw, 36px); line-height: 1; color: var(--text); font-weight: 500; }
+  .strip .v small { font-size: .5em; color: var(--text-2); margin-left: 4px; }
+  .strip .k { font-family: var(--mono); font-size: 12px; color: var(--text-3); margin-top: 10px; letter-spacing: .04em; text-transform: uppercase; }
+
+  /* ---- sections ---- */
+  section { padding: clamp(56px, 8vw, 96px) var(--gutter) 0; }
+  .sec-head { display: grid; grid-template-columns: 1fr 2fr; gap: 32px; align-items: baseline; margin-bottom: 36px; }
+  @media (max-width: 900px) { .sec-head { grid-template-columns: 1fr; gap: 10px; } }
+  .sec-head h2 { font-family: var(--serif); font-weight: 400; font-size: clamp(32px, 4vw, 48px); margin: 0; line-height: 1.05; }
+  .sec-head p { margin: 0; color: var(--text-2); max-width: var(--measure); }
+  .num { font-family: var(--mono); color: var(--amber); font-size: 13px; margin-right: 12px; }
+
+  .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); }
+  @media (max-width: 900px) { .facts { grid-template-columns: 1fr; } }
+  .facts article { background: var(--ink); padding: 26px 24px 28px; }
+  .facts h3 { margin: 0 0 10px; font: 500 17px/1.3 var(--sans); }
+  .facts p { margin: 0; color: var(--text-2); font-size: 15.5px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th { text-align: left; font-family: var(--mono); font-weight: 500; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-3); padding: 10px 12px; border-bottom: 1px solid var(--line-strong); }
+  td { padding: 14px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:first-child { color: var(--text); font-weight: 500; }
+  tr:hover td { background: rgba(255,255,255,.025); }
+  .yes { color: var(--amber); font-family: var(--mono); }
+  .table-wrap { overflow-x: auto; }
+
+  .steps { counter-reset: s; display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+  @media (max-width: 900px) { .steps { grid-template-columns: 1fr; } }
+  .steps div { border-top: 1px solid var(--line-strong); padding-top: 16px; }
+  .steps div::before { counter-increment: s; content: "0" counter(s); font-family: var(--mono); color: var(--amber); font-size: 13px; display: block; margin-bottom: 10px; }
+  .steps h3 { margin: 0 0 8px; font: 500 17px/1.3 var(--sans); }
+  .steps p { margin: 0; color: var(--text-2); font-size: 15.5px; }
+
+  .log { background: var(--ink-2); border: 1px solid var(--line); border-left: 3px solid var(--amber); padding: 18px 20px; font-family: var(--mono); font-size: 13px; line-height: 1.7; color: var(--text-2); overflow-x: auto; }
+  .log b { color: var(--text); font-weight: 500; }
+
+  details { border-top: 1px solid var(--line); padding: 16px 0; }
+  details:last-of-type { border-bottom: 1px solid var(--line); }
+  summary { cursor: pointer; font-weight: 500; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; font-family: var(--mono); color: var(--amber); }
+  details[open] summary::after { content: "–"; }
+  details p { margin: 12px 0 0; color: var(--text-2); max-width: var(--measure); }
+
+  footer { margin-top: clamp(64px, 9vw, 120px); padding: 28px var(--gutter) 48px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12.5px; color: var(--text-3); display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
+  footer a { color: var(--text-2); }
 </style>
 </head>
 <body>
+
+<header class="rail">
+  <div class="brand">UScreen <small>for Linux</small></div>
+  <nav>
+    <a href="#install">Install</a>
+    <a href="#numbers">Numbers</a>
+    <a href="#compare">Compare</a>
+    <a href="#faq">FAQ</a>
+    <a href="https://github.com/majmichu1/UScreen">GitHub</a>
+  </nav>
+</header>
+
 <main>
-<h1>UScreen for Linux — Android tablet as a USB second monitor</h1>
-<p class="lead"><strong>UScreen is an open-source SuperDisplay alternative for Linux.</strong> It turns an Android 8.1+ tablet into a real extended USB display and a pressure-sensitive graphics tablet, with touch, S Pen pressure, tilt, eraser and stylus-button support.</p>
-<p>UScreen uses a direct ADB-over-USB connection — no Wi-Fi, USB tethering, dummy HDMI plug or cloud account required. Tested on Bazzite (KDE Plasma, Wayland, NVIDIA) with a Samsung Galaxy Tab S9 Ultra; packages cover Bazzite, Fedora, Ubuntu/Debian, Arch Linux and openSUSE.</p>
-<p class="cta">
-  <a href="https://github.com/majmichu1/UScreen/releases/latest">Download 1.1.0</a>
-  <a class="secondary" href="https://github.com/majmichu1/UScreen/blob/main/docs/installation.md">Installation</a>
-  <a class="secondary" href="https://github.com/majmichu1/UScreen/blob/main/docs/compatibility.md">Compatibility</a>
-  <a class="secondary" href="https://github.com/majmichu1/UScreen/blob/main/docs/benchmarks.md">Benchmarks</a>
-  <a class="secondary" href="https://github.com/majmichu1/UScreen">Source on GitHub</a>
-</p>
-<p class="muted">Version 1.1.0 · released 2026-08-31 · MIT license</p>
+<section class="hero">
+  <div>
+    <p class="kicker">Open-source SuperDisplay alternative for Linux</p>
+    <h1>Your Android tablet, as a <em>real</em> second monitor. Over one USB cable.</h1>
+    <p class="lead">UScreen creates an extended display on the Linux side, streams it to the tablet with hardware encoding, and hands the <strong>S Pen back as a graphics tablet</strong> — pressure, tilt, eraser, button. No Wi-Fi, no tethering, no dummy plug, no account.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/majmichu1/UScreen/releases/latest">Download 1.1.0</a>
+      <a class="btn" href="#install">Install in three steps</a>
+      <span class="meta">MIT · Linux + Android 8.1+ · 2026-08-31</span>
+    </div>
+  </div>
 
-<h2>What it does</h2>
-<ul>
-  <li><strong>A real second monitor, not a mirror</strong> — a virtual display through the EVDI kernel module, in your display settings like any other.</li>
-  <li><strong>Pen that works like a tablet</strong> — pressure, tilt, eraser and button arrive as a Linux graphics-tablet device. A one-tap graphics-tablet mode uses the pen on your own screen with zero display latency.</li>
-  <li><strong>Low latency, measured</strong> — about 22 ms median end-to-end over USB with H.264 and 15–18 ms with HEVC on the reference hardware, method published.</li>
-  <li><strong>Plug in and it works</strong> — starts with your desktop, finds the tablet over adb, launches the app, sizes the display to the tablet's panel.</li>
-  <li><strong>Private by construction</strong> — loopback-only ports guarded by a per-session token, no telemetry, no account.</li>
-</ul>
+  <figure class="topology" aria-label="Diagram: a laptop's desktop extended onto a tablet over a USB cable">
+    <svg viewBox="0 0 560 340" role="img" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <clipPath id="lap"><rect x="34" y="54" width="232" height="150" rx="3"/></clipPath>
+        <clipPath id="tab"><rect x="330" y="96" width="190" height="126" rx="4"/></clipPath>
+      </defs>
+      <!-- laptop -->
+      <rect x="28" y="48" width="244" height="162" rx="6" fill="#1c1b18" stroke="#4a4740"/>
+      <g clip-path="url(#lap)">
+        <rect x="34" y="54" width="232" height="150" fill="#22211d"/>
+        <rect x="46" y="70" width="128" height="86" rx="2" fill="#2b2a25" stroke="#3d3b35"/>
+        <rect x="46" y="70" width="128" height="12" fill="#3a3832"/>
+        <rect x="184" y="70" width="70" height="52" rx="2" fill="#2b2a25" stroke="#3d3b35"/>
+        <rect x="46" y="166" width="208" height="8" rx="2" fill="#2b2a25"/>
+      </g>
+      <rect x="12" y="210" width="276" height="10" rx="3" fill="#2e2c27"/>
+      <text x="34" y="236" font-family="IBM Plex Mono, monospace" font-size="11" fill="#6f6b63">eDP-1 · 2560×1600</text>
 
-<h2>Quick install</h2>
-<table>
-<tr><th>File</th><th>Distribution</th></tr>
-<tr><td><code>uscreen_1.1.0_amd64.deb</code></td><td>Debian 12+, Ubuntu 22.04+, Mint, Pop — <code>sudo apt install ./uscreen_*.deb</code></td></tr>
-<tr><td><code>uscreen-1.1.0-1.x86_64.rpm</code></td><td>openSUSE; Fedora with RPM Fusion enabled</td></tr>
-<tr><td><code>uscreen-1.1.0-PKGBUILD.tar.gz</code></td><td>Arch and derivatives — <code>makepkg -si</code></td></tr>
-<tr><td><code>uscreen-1.1.0-linux-x86_64.tar.gz</code></td><td>Bazzite, Nobara, anything else — <code>./scripts/install.sh</code></td></tr>
-<tr><td><code>uscreen.apk</code></td><td>the tablet (enable USB debugging)</td></tr>
-</table>
-<p>Then <code>systemctl --user enable --now uscreen</code>, plug the cable in, and the tablet appears as a monitor. <code>uscreen doctor</code> explains anything that is off.</p>
+      <!-- cable: the one moving thing on the page -->
+      <path d="M288 215 C 320 215, 300 258, 332 258 L 420 258 C 448 258, 430 224, 425 224" fill="none" stroke="#2e2c27" stroke-width="3"/>
+      <path class="flow" d="M288 215 C 320 215, 300 258, 332 258 L 420 258 C 448 258, 430 224, 425 224" fill="none" stroke="#f0a742" stroke-width="1.5"/>
+      <text x="336" y="278" font-family="IBM Plex Mono, monospace" font-size="11" fill="#f0a742">USB · adb reverse · 5–7 ms</text>
 
-<h2>Measured latency</h2>
-<table>
-<tr><th></th><th>median</th><th>p95</th></tr>
-<tr><td>H.264, NVENC, USB</td><td>18–22 ms</td><td>23–31 ms</td></tr>
-<tr><td>HEVC, NVENC, USB</td><td>15–18 ms</td><td>20–23 ms</td></tr>
-<tr><td>Wi-Fi fallback (H.264)</td><td>22.8 ms</td><td>78.6 ms, worst frames in seconds</td></tr>
-</table>
-<p class="muted">Bazzite KDE + RTX 5060 + Galaxy Tab S9 Ultra at 2960×1848. The tablet's decoder is ~15 ms of it, the USB hop 5–7 ms, the encoder under 1 ms. Method and limitations in the benchmarks page.</p>
+      <!-- tablet, drawn as an extension: same wallpaper tone, a window dragged across, a pen stroke -->
+      <rect x="322" y="86" width="206" height="146" rx="8" fill="#1c1b18" stroke="#4a4740"/>
+      <g clip-path="url(#tab)">
+        <rect x="330" y="96" width="190" height="126" fill="#22211d"/>
+        <rect x="318" y="110" width="98" height="64" rx="2" fill="#2b2a25" stroke="#3d3b35"/>
+        <rect x="318" y="110" width="98" height="10" fill="#3a3832"/>
+        <path d="M372 200 C 392 150, 430 205, 452 130 S 500 170, 508 118" fill="none" stroke="#f0a742" stroke-width="2.4" stroke-linecap="round" opacity=".9"/>
+      </g>
+      <text x="330" y="86" dy="-8" font-family="IBM Plex Mono, monospace" font-size="11" fill="#6f6b63">DVI-I-1 (EVDI) · 2960×1848 · S Pen</text>
+      <!-- pen -->
+      <g transform="translate(468 118) rotate(38)">
+        <rect x="-3" y="-42" width="6" height="52" rx="2" fill="#ece8df"/>
+        <path d="M-3 10 L0 20 L3 10 Z" fill="#f0a742"/>
+      </g>
+      <!-- readout -->
+      <g font-family="IBM Plex Mono, monospace" font-size="11" fill="#a8a399">
+        <text x="34" y="300">encode→display</text>
+        <text x="34" y="318" fill="#ece8df" font-size="14">p50 <tspan fill="#f0a742">19.3 ms</tspan>   p95 <tspan fill="#f0a742">22.9 ms</tspan></text>
+        <text x="330" y="300">tablet decode+render</text>
+        <text x="330" y="318" fill="#ece8df" font-size="14">≈ <tspan fill="#f0a742">15 ms</tspan> of that</text>
+      </g>
+    </svg>
+    <figcaption>Measured on the reference setup: Bazzite KDE + RTX 5060, Galaxy Tab S9 Ultra, H.264 over USB.</figcaption>
+  </figure>
+</section>
 
-<h2>Compared with the alternatives</h2>
-<table>
-<tr><th></th><th>UScreen</th><th>SuperDisplay</th><th>Weylus</th><th>Sunshine + Moonlight</th><th>spacedesk</th></tr>
-<tr><td>Linux host</td><td><strong>yes</strong></td><td>no</td><td>yes</td><td>yes</td><td>no</td></tr>
-<tr><td>Real extended display</td><td><strong>yes</strong> (EVDI)</td><td>yes</td><td>separate setup</td><td>needs existing/dummy display</td><td>yes</td></tr>
-<tr><td>Direct USB, no tethering</td><td><strong>yes</strong></td><td>yes</td><td>via adb forward</td><td>no</td><td>no</td></tr>
-<tr><td>S Pen pressure / tilt / eraser</td><td><strong>yes / yes / yes</strong></td><td>yes / yes / yes</td><td>yes / yes / no</td><td>partial / no / no</td><td>partial / no / no</td></tr>
-<tr><td>Open source</td><td><strong>MIT</strong></td><td>no</td><td>AGPL</td><td>GPL</td><td>no</td></tr>
-</table>
-<p class="muted">Checked against each project's documentation in August 2026; corrections welcome as issues.</p>
+<div class="strip" aria-label="Key figures">
+  <div><div class="v">22<small>ms</small></div><div class="k">median latency, USB, H.264</div></div>
+  <div><div class="v">15–18<small>ms</small></div><div class="k">with HEVC</div></div>
+  <div><div class="v">0<small>bytes</small></div><div class="k">sent to any cloud</div></div>
+  <div><div class="v">5<small>families</small></div><div class="k">of Linux packages</div></div>
+</div>
 
-<h2>FAQ</h2>
-<details open><summary>Does it need Wi-Fi or USB tethering?</summary><p>No. It uses the adb connection provided by USB debugging over a normal USB cable. Wi-Fi is an optional fallback with more stutter.</p></details>
-<details><summary>Is it a mirror or an extension?</summary><p>An extension: a real monitor in the display settings. Graphics-tablet mode is a separate, non-display mode.</p></details>
-<details><summary>Does S Pen pressure and tilt work?</summary><p>Yes, plus the eraser and the stylus button, as a proper tablet device.</p></details>
-<details><summary>Does it work on Bazzite and KDE Wayland?</summary><p>That is the reference setup. GNOME and X11 get the display and the stream; input mapping is manual there.</p></details>
-<details><summary>Does it need a dummy HDMI plug?</summary><p>No. The virtual display is created in software by EVDI.</p></details>
-<details><summary>Which Android versions?</summary><p>8.1 and newer, on any device with a hardware H.264 decoder.</p></details>
-<details><summary>Is anything sent to the cloud?</summary><p>No. The only outbound request is an optional version check against GitHub.</p></details>
-<details><summary>How is it different from Weylus?</summary><p>Weylus makes the tablet's browser an input device and can show the screen in it; a virtual display has to be set up separately. UScreen creates the display itself, streams it with hardware encoding to a native app, and maps the input onto that display automatically on KDE.</p></details>
-<details><summary>How do I uninstall it completely?</summary><p>Remove the package or the files in <code>~/.local/bin</code>, the systemd user unit, and the three system files the installer creates. The exact commands are in <a href="https://github.com/majmichu1/UScreen/blob/main/SECURITY.md">SECURITY.md</a>.</p></details>
+<section id="why">
+  <div class="sec-head">
+    <h2>Not a mirror.<br>A monitor.</h2>
+    <p>Most tablet-as-display tools show you a copy of a screen that already exists. UScreen makes a new one, through the same kernel interface DisplayLink docks use, and the desktop treats it like any other output.</p>
+  </div>
+  <div class="facts">
+    <article><h3>Extended display through EVDI</h3><p>A virtual output with the tablet's own resolution and physical size. It appears in Display settings; you drag windows onto it; KDE places it next to your real screens for you.</p></article>
+    <article><h3>S Pen as a tablet device</h3><p>Pressure, tilt, eraser end and the stylus button arrive in Linux as a real graphics-tablet device, mapped to the right screen. Krita, GIMP and Blender see a tablet, not a mouse.</p></article>
+    <article><h3>Graphics-tablet mode</h3><p>One tap and nothing is streamed: the pen drives the screen you are already looking at, like a Wacom Intuos, with zero display latency in the loop.</p></article>
+    <article><h3>Plug in, that's it</h3><p>The daemon starts with your desktop, watches adb, launches the app on the tablet and sizes the display to its panel. <code>uscreen doctor</code> explains anything that is off.</p></article>
+    <article><h3>Hardware all the way</h3><p>NVENC or VAAPI encoding on the host, MediaCodec decoding on the tablet, H.264 by default, HEVC and 10-bit optional. The encoder is under a millisecond; the tablet's decoder is most of the budget.</p></article>
+    <article><h3>Private by construction</h3><p>Loopback-only ports guarded by a per-session token, a private runtime directory, no telemetry, no account. The only outbound request is an optional version check.</p></article>
+  </div>
+</section>
+
+<section id="install">
+  <div class="sec-head">
+    <h2>Install</h2>
+    <p>Pick the file for your distribution, install the app on the tablet, plug in. Every release ships the same set plus <code>SHA256SUMS</code>.</p>
+  </div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>File</th><th>Distribution</th><th>Command</th></tr></thead>
+    <tbody>
+      <tr><td><code>uscreen_1.1.0_amd64.deb</code></td><td>Debian 12+, Ubuntu 22.04+, Mint, Pop</td><td><code>sudo apt install ./uscreen_*.deb</code></td></tr>
+      <tr><td><code>uscreen-1.1.0-1.x86_64.rpm</code></td><td>openSUSE · Fedora (RPM Fusion first)</td><td><code>zypper install ./uscreen-*.rpm</code> · <code>dnf install --allowerasing ./uscreen-*.rpm</code></td></tr>
+      <tr><td><code>uscreen-1.1.0-PKGBUILD.tar.gz</code></td><td>Arch, Manjaro, EndeavourOS, CachyOS</td><td><code>makepkg -si</code></td></tr>
+      <tr><td><code>uscreen-1.1.0-linux-x86_64.tar.gz</code></td><td>Bazzite, Nobara, anything else</td><td><code>./scripts/install.sh</code></td></tr>
+      <tr><td><code>uscreen.apk</code></td><td>the tablet</td><td>install, enable USB debugging</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="steps" style="margin-top:40px">
+    <div><h3>Enable the daemon</h3><p><code>systemctl --user enable --now uscreen</code>. The tarball installer does this for you and adds a menu entry.</p></div>
+    <div><h3>Plug the cable in</h3><p>The daemon forwards the ports over adb and launches the app on the tablet. Accept the USB-debugging prompt once.</p></div>
+    <div><h3>Use it like a monitor</h3><p>It is in Display settings, sized to the tablet. Touch and the pen work on it immediately. Flip <em>Graphics tablet</em> in the app when you want to draw on the laptop screen instead.</p></div>
+  </div>
+  <p style="margin-top:28px;color:var(--text-2);max-width:var(--measure)">Details, including exactly what the installer changes on the system, in <a href="https://github.com/majmichu1/UScreen/blob/main/docs/installation.md">docs/installation.md</a>. Update both halves together: since 1.1.0 they share a session token.</p>
+</section>
+
+<section id="numbers">
+  <div class="sec-head">
+    <h2>Numbers, with the method</h2>
+    <p>Every frame carries a sequence number; the tablet echoes it when the frame reaches the screen; the daemon logs the round trip on its own clock. Published, reproducible, and honest about Wi-Fi.</p>
+  </div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Path</th><th>Median</th><th>p95</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>USB, H.264 (NVENC)</td><td class="mono">18–22 ms</td><td class="mono">23–31 ms</td><td>default</td></tr>
+      <tr><td>USB, HEVC (NVENC)</td><td class="mono">15–18 ms</td><td class="mono">20–23 ms</td><td>the tablet has a dedicated low-latency HEVC decoder</td></tr>
+      <tr><td>USB, HEVC Main10</td><td class="mono">16–17 ms</td><td class="mono">19–22 ms</td><td>10-bit costs nothing measurable; smooths gradient banding</td></tr>
+      <tr><td>Wi-Fi, H.264</td><td class="mono">22.8 ms</td><td class="mono">78.6 ms</td><td>single frames seen past two seconds — a fallback, not a mode</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="log" style="margin-top:28px" aria-label="Excerpt from the daemon log">
+    <b>uscreen::latency</b> Latency encode→display: p50 <b>19.3ms</b>  p95 <b>22.9ms</b>  max 28.7ms  (25 samples, 1 in flight, 0 aged out)<br>
+    <b>uscreen::latency</b>   of which tablet decode+render p50 <b>13.1ms</b>  p95 16.9ms  → wire ~6.2ms
+  </div>
+  <p style="margin-top:20px;color:var(--text-2);max-width:var(--measure)">Reference hardware: Bazzite (KDE Plasma 6, Wayland), NVIDIA RTX 5060 Laptop, Galaxy Tab S9 Ultra at 2960×1848. Full method, CPU figures and limitations in <a href="https://github.com/majmichu1/UScreen/blob/main/docs/benchmarks.md">docs/benchmarks.md</a>.</p>
+</section>
+
+<section id="compare">
+  <div class="sec-head">
+    <h2>Against the alternatives</h2>
+    <p>Checked against each project's own documentation in August 2026. Where a competitor does something partially, it says so; corrections are welcome as issues.</p>
+  </div>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th></th><th>UScreen</th><th>SuperDisplay</th><th>Weylus</th><th>Sunshine + Moonlight</th><th>spacedesk</th></tr></thead>
+    <tbody>
+      <tr><td>Linux host</td><td class="yes">yes</td><td>no — Windows, macOS</td><td>yes</td><td>yes</td><td>no — Windows</td></tr>
+      <tr><td>Real extended display</td><td class="yes">yes, EVDI</td><td>yes</td><td>separate virtual-display setup</td><td>needs an existing or dummy display</td><td>yes</td></tr>
+      <tr><td>Direct USB, no tethering</td><td class="yes">yes, adb</td><td>yes</td><td>via adb port forward</td><td>no, network</td><td>no, network</td></tr>
+      <tr><td>Pen pressure / tilt / eraser</td><td class="yes">yes / yes / yes</td><td>yes / yes / yes</td><td>yes / yes / no</td><td>partial / no / no</td><td>partial / no / no</td></tr>
+      <tr><td>Hardware encoding</td><td class="yes">NVENC, VAAPI, x264</td><td>yes</td><td>yes</td><td>yes</td><td>yes</td></tr>
+      <tr><td>Open source</td><td class="yes">MIT</td><td>no</td><td>AGPL</td><td>GPL</td><td>no</td></tr>
+      <tr><td>Dummy HDMI plug</td><td class="yes">never</td><td>no</td><td>sometimes</td><td>often</td><td>no</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="sec-head">
+    <h2>Questions people ask</h2>
+    <p>Short answers. Longer ones in <a href="https://github.com/majmichu1/UScreen/blob/main/docs/faq.md">docs/faq.md</a>.</p>
+  </div>
+  <details open><summary>Does it need Wi-Fi or USB tethering?</summary><p>No. It uses the adb connection that USB debugging provides, over a normal USB cable. Wi-Fi is an optional fallback with more stutter.</p></details>
+  <details><summary>Is it a mirror or an extension?</summary><p>An extension — a real monitor in your display settings. Graphics-tablet mode is a separate, non-display mode.</p></details>
+  <details><summary>Does S Pen pressure and tilt work?</summary><p>Yes, plus the eraser end and the stylus button, as a proper tablet device.</p></details>
+  <details><summary>Does it work on Bazzite and KDE Wayland?</summary><p>That is the reference setup. GNOME and X11 get the display and the stream; input mapping is manual there for now.</p></details>
+  <details><summary>Does it need a dummy HDMI plug?</summary><p>No. The virtual display is created in software by EVDI.</p></details>
+  <details><summary>Which Android versions?</summary><p>8.1 and newer, on any device with a hardware H.264 decoder.</p></details>
+  <details><summary>Is anything sent to the cloud?</summary><p>No. The only outbound request is an optional check of the latest release tag on GitHub.</p></details>
+  <details><summary>How is it different from Weylus?</summary><p>Weylus makes the tablet's browser an input device and can show the screen in it; a virtual display has to be set up separately. UScreen creates the display itself, streams it with hardware encoding to a native app, and maps the input onto that display automatically on KDE.</p></details>
+  <details><summary>How do I uninstall it completely?</summary><p>Remove the package or the files in <code>~/.local/bin</code>, the systemd user unit, and the three system files the installer creates. The exact commands are in <a href="https://github.com/majmichu1/UScreen/blob/main/SECURITY.md">SECURITY.md</a>.</p></details>
+</section>
+</main>
 
 <footer>
-<p><a href="https://github.com/majmichu1/UScreen">Source and issues on GitHub</a> · <a href="https://github.com/majmichu1/UScreen/discussions">Discussions</a> · <a href="https://github.com/majmichu1/UScreen/blob/main/SECURITY.md">Security</a> · <a href="https://github.com/majmichu1/UScreen/blob/main/CHANGELOG.md">Changelog</a> · <a href="llms.txt">llms.txt</a></p>
-<p>UScreen for Linux is not affiliated with Uscreen.tv, SuperDisplay or DisplayLink.</p>
+  <span>UScreen for Linux · MIT · not affiliated with Uscreen.tv, SuperDisplay or DisplayLink</span>
+  <span>
+    <a href="https://github.com/majmichu1/UScreen">source</a> ·
+    <a href="https://github.com/majmichu1/UScreen/discussions">discussions</a> ·
+    <a href="https://github.com/majmichu1/UScreen/blob/main/SECURITY.md">security</a> ·
+    <a href="https://github.com/majmichu1/UScreen/blob/main/CHANGELOG.md">changelog</a> ·
+    <a href="llms.txt">llms.txt</a>
+  </span>
 </footer>
-</main>
 </body>
 </html>
