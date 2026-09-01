@@ -715,35 +715,19 @@ async fn kwin_device_property(sysname: &str, property: &str) -> Option<String> {
 /// Setting the property directly takes effect immediately, and KWin persists it
 /// itself.
 async fn map_devices_to_output(pen_only: bool, ident: &DeviceIdentity, card: Option<u32>) {
-    let output = if pen_only {
-        match primary_non_evdi_output().await {
-            Some(name) => name,
-            None => {
-                warn!("No physical output found — pen will address the whole desktop");
-                return;
-            }
+    let Some(output) = target_output(pen_only, card, std::time::Duration::from_secs(10)).await
+    else {
+        if pen_only {
+            warn!("No physical output found — pen will address the whole desktop");
+        } else {
+            warn!("No EVDI output found — touch and pen will address the whole desktop");
         }
-    } else {
-        let connectors = crate::vdisplay::evdi_connectors();
-        // This tablet's own card first; "any connected EVDI output" only as
-        // a fallback while the card is not known yet.
-        match connectors
-            .iter()
-            .find(|c| card.is_some_and(|want| c.card == want))
-            .or_else(|| connectors.iter().find(|c| c.connected))
-            .or_else(|| connectors.first())
-            .map(|c| c.name.clone())
-        {
-            Some(name) => name,
-            None => {
-                warn!("No EVDI output found — touch and pen will address the whole desktop");
-                return;
-            }
-        }
+        return;
     };
 
     // KWin registers a device slightly after uinput creates it, so retry
-    // rather than racing it.
+    // rather than racing it. The same loop also covers a mapping that KWin
+    // accepted but did not keep, which is what the read-back below catches.
     for attempt in 0..20 {
         if attempt > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -789,8 +773,22 @@ async fn map_devices_to_output(pen_only: bool, ident: &DeviceIdentity, card: Opt
                 .await;
             match r {
                 Ok(o) if o.status.success() => {
-                    info!("Mapped '{}' ({}) to output {}", name, sysname, output);
-                    mapped += 1;
+                    // A successful Set is not proof: KWin answers ok and then
+                    // keeps the old value when the output is not usable yet.
+                    // Only what reads back counts, so a lost mapping is
+                    // retried on the next pass instead of logged as done.
+                    match kwin_device_property(&sysname, "outputName").await {
+                        Some(now) if now == output => {
+                            info!("Mapped '{}' ({}) to output {}", name, sysname, output);
+                            mapped += 1;
+                        }
+                        now => warn!(
+                            "Mapping '{}' to {} did not take (KWin reports {:?}) — retrying",
+                            name,
+                            output,
+                            now.unwrap_or_default()
+                        ),
+                    }
                 }
                 Ok(o) => warn!(
                     "Could not map '{}': {}",
@@ -807,6 +805,85 @@ async fn map_devices_to_output(pen_only: bool, ident: &DeviceIdentity, card: Opt
     }
 
     warn!("Input devices did not appear in KWin within 5s — mapping skipped");
+}
+
+/// The outputs KWin currently knows, as reported by `kscreen-doctor -j`.
+/// `None` when the tool is not there at all (not a KDE session).
+async fn kscreen_outputs() -> Option<Vec<serde_json::Value>> {
+    let out = tokio::process::Command::new("kscreen-doctor")
+        .arg("-j")
+        .output()
+        .await
+        .ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    Some(v.get("outputs")?.as_array()?.clone())
+}
+
+/// The output the devices should address in this mode, returned only once
+/// KWin lists it as enabled.
+///
+/// Mapping is not something that can be done ahead of time: set `outputName`
+/// while the virtual display is still being brought back and KWin keeps the
+/// previous mapping, so after leaving graphics-tablet mode the pen and touch
+/// would go on driving the laptop screen (issue #6). Leaving display mode has
+/// the opposite problem — the physical screen is always there, but the EVDI
+/// output is going away at that moment. So this polls the output list up to
+/// `timeout` and only then falls back to the best name it knows, so a mapping
+/// is at least attempted on a desktop where kscreen-doctor cannot answer.
+async fn target_output(
+    pen_only: bool,
+    card: Option<u32>,
+    timeout: std::time::Duration,
+) -> Option<String> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        if pen_only {
+            if let Some(name) = primary_non_evdi_output().await {
+                return Some(name);
+            }
+            // No kscreen-doctor means no KDE session: nothing to wait for.
+            kscreen_outputs().await?;
+        } else {
+            let connectors = crate::vdisplay::evdi_connectors();
+            // This tablet's own card first; "any connected EVDI output" only
+            // as a fallback while the card is not known yet.
+            let fallback = connectors
+                .iter()
+                .find(|c| card.is_some_and(|want| c.card == want))
+                .or_else(|| connectors.iter().find(|c| c.connected))
+                .or_else(|| connectors.first())
+                .map(|c| c.name.clone());
+            let Some(outputs) = kscreen_outputs().await else {
+                return fallback;
+            };
+            let mine: Vec<&str> = connectors
+                .iter()
+                .filter(|c| card.is_none_or(|want| c.card == want))
+                .map(|c| c.name.as_str())
+                .collect();
+            let enabled = outputs.iter().find(|o| {
+                let name = o.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                mine.contains(&name)
+                    && o.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false)
+            });
+            if let Some(o) = enabled {
+                return o.get("name").and_then(|v| v.as_str()).map(str::to_string);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                if fallback.is_some() {
+                    warn!(
+                        "EVDI output not enabled within {:?} — mapping onto {:?} anyway",
+                        timeout, fallback
+                    );
+                }
+                return fallback;
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
 }
 
 pub struct InputServer {
@@ -925,8 +1002,11 @@ impl InputServer {
             let ident_map = ident.clone();
             let initial = *mode_rx.borrow_and_update();
             let card0 = *card_rx.borrow_and_update();
-            map_devices_to_output(initial, &ident_map, card0).await;
+            // The first mapping waits for the virtual display to be enabled
+            // like every later one, so it runs in the background rather than
+            // holding up the accept loop below.
             tokio::spawn(async move {
+                map_devices_to_output(initial, &ident_map, card0).await;
                 loop {
                     tokio::select! {
                         r = mode_rx.changed() => { if r.is_err() { break; } }
@@ -938,10 +1018,9 @@ impl InputServer {
                         guard.release_all();
                     }
                     // Leaving display mode tears the virtual output down and
-                    // entering it brings the output back; either way KWin is
-                    // mid-reconfiguration right now, and mapping onto an
-                    // output it is still moving would not stick.
-                    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                    // entering it brings the output back. map_devices_to_output
+                    // waits for the output it needs to actually be enabled, so
+                    // a mode change during the wait simply restarts it.
                     info!(
                         "Mode is now {} — remapping input devices{}",
                         if pen_only { "pen-only" } else { "second screen" },

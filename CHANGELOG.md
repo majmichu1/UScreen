@@ -3,6 +3,13 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
+## Unreleased
+
+- Fix: after leaving graphics-tablet mode the pen and touch could stay mapped
+  to the laptop screen. The daemon now waits for the virtual display to be
+  enabled before mapping the input devices and verifies the mapping instead of
+  assuming it ([#6](https://github.com/majmichu1/UScreen/issues/6)).
+
 ## 1.1.0 — 2026-08-31
 
 - Security: session token between app and daemon; capture FIFO moved out of
