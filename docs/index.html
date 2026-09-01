@@ -81,7 +81,7 @@
     --line-strong: #4a4740;
     --text: #ece8df;         /* warm paper white */
     --text-2: #a8a399;
-    --text-3: #6f6b63;
+    --text-3: #8a867d;       /* 5.1:1 on --ink, 4.75:1 on --ink-2 — used at 11.5–13px */
     --amber: #f0a742;        /* the one accent: an indicator lamp */
     --amber-dim: #8a5f24;
     --serif: "Instrument Serif", Georgia, "Times New Roman", serif;
@@ -116,7 +116,11 @@
   header.rail .brand small { color: var(--amber); margin-left: 8px; }
   header.rail nav a { color: var(--text-2); margin-left: 22px; }
   header.rail nav a:hover { color: var(--text); text-decoration: none; }
-  @media (max-width: 720px) { header.rail nav { display: none; } }
+  /* on phones keep only the GitHub link; the sections are one scroll away anyway */
+  @media (max-width: 720px) { header.rail nav a:not(:last-child) { display: none; } }
+  .skip { position: absolute; left: 12px; top: -60px; z-index: 10; padding: 10px 14px; background: var(--amber); color: var(--ink); font-family: var(--mono); font-size: 13px; border-radius: 3px; }
+  .skip:focus { top: 12px; text-decoration: none; }
+  time { white-space: nowrap; }
 
   /* ---- hero: asymmetric, headline left, diagram right ---- */
   .hero {
@@ -184,6 +188,16 @@
   tr:hover td { background: rgba(255,255,255,.025); }
   .yes { color: var(--amber); font-family: var(--mono); }
   .table-wrap { overflow-x: auto; }
+  .table-wrap:focus-visible { outline-offset: 6px; }
+  @media (max-width: 720px) {
+    /* say that there is more to the right, and fade the cut edge so it reads as scrollable, not truncated */
+    .table-wrap::before { content: attr(data-hint); display: block; font-family: var(--mono); font-size: 12px; color: var(--amber); margin-bottom: 8px; }
+    .table-wrap {
+      background:
+        linear-gradient(to left, var(--ink) 35%, rgba(20,19,17,0)) right / 44px 100% no-repeat local,
+        linear-gradient(to left, rgba(20,19,17,.9), rgba(20,19,17,0)) right / 28px 100% no-repeat scroll;
+    }
+  }
 
   .steps { counter-reset: s; display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
   @media (max-width: 900px) { .steps { grid-template-columns: 1fr; } }
@@ -221,6 +235,7 @@
 </head>
 <body>
 
+<a class="skip" href="#main">Skip to content</a>
 <header class="rail">
   <div class="brand">UScreen <small>for Linux</small></div>
   <nav>
@@ -232,7 +247,7 @@
   </nav>
 </header>
 
-<main>
+<main id="main">
 <section class="hero">
   <div>
     <p class="kicker">Open-source SuperDisplay alternative for Linux</p>
@@ -246,8 +261,10 @@
   </div>
 
   <!-- Hero image: when docs/assets/uscreen-hero.jpg (a real photo of the tablet running UScreen, 1600×1000) exists, put it here as <img> and keep the diagram as a fallback below it. -->
-  <figure class="topology" aria-label="Diagram: a laptop's desktop extended onto a tablet over a USB cable">
-    <svg viewBox="0 0 560 340" role="img" xmlns="http://www.w3.org/2000/svg">
+  <figure class="topology">
+    <svg viewBox="0 0 560 340" role="img" aria-labelledby="topo-t topo-d" xmlns="http://www.w3.org/2000/svg">
+      <title id="topo-t">A laptop's desktop extended onto a tablet over a USB cable</title>
+      <desc id="topo-d">A laptop screen on the left and a tablet on the right, joined by one USB cable. A window has been moved from the laptop onto the tablet, and the tablet's pen sends input back over the same cable.</desc>
       <defs>
         <clipPath id="lap"><rect x="34" y="54" width="232" height="150" rx="3"/></clipPath>
         <clipPath id="tab"><rect x="330" y="96" width="190" height="126" rx="4"/></clipPath>
@@ -298,7 +315,7 @@
 <div class="strip" aria-label="Key figures">
   <div><div class="v">22<small>ms</small></div><div class="k">median latency, USB, H.264</div></div>
   <div><div class="v">15–18<small>ms</small></div><div class="k">with HEVC</div></div>
-  <div><div class="v">0<small>bytes</small></div><div class="k">sent to any cloud</div></div>
+  <div><div class="v">0<small>bytes</small></div><div class="k">of screen or input data sent to any cloud</div></div>
   <div><div class="v">5<small>families</small></div><div class="k">of Linux packages</div></div>
 </div>
 
@@ -322,7 +339,7 @@
     <h2>Install</h2>
     <p>Pick the file for your distribution, install the app on the tablet, plug in. Every release ships the same set plus <code>SHA256SUMS</code>.</p>
   </div>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0" aria-label="Release files by distribution; scrolls sideways on narrow screens" data-hint="Swipe to see the commands →">
   <table>
     <thead><tr><th>File</th><th>Distribution</th><th>Command</th></tr></thead>
     <tbody>
@@ -347,7 +364,7 @@
     <h2>Numbers, with the method</h2>
     <p>Every frame carries a sequence number; the tablet echoes it when the frame reaches the screen; the daemon logs the round trip on its own clock. Published, reproducible, and honest about Wi-Fi.</p>
   </div>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0" aria-label="Measured latency by transport and codec; scrolls sideways on narrow screens" data-hint="Swipe for notes →">
   <table>
     <thead><tr><th>Path</th><th>Median</th><th>p95</th><th>Notes</th></tr></thead>
     <tbody>
@@ -370,7 +387,7 @@
     <h2>Against the alternatives</h2>
     <p>Checked against official project documentation in August 2026. Where a project does something partially, it says so; where its documentation does not answer, the cell says <em>unknown</em>. Corrections are welcome as issues.</p>
   </div>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0" aria-label="Feature comparison with SuperDisplay, Weylus, Sunshine plus Moonlight and spacedesk; scrolls sideways on narrow screens" data-hint="Swipe to compare →">
   <table>
     <thead><tr><th></th><th>UScreen</th><th><a href="https://superdisplay.app/">SuperDisplay</a></th><th><a href="https://github.com/H-M-H/Weylus">Weylus</a></th><th><a href="https://github.com/LizardByte/Sunshine">Sunshine</a> + <a href="https://github.com/moonlight-stream/moonlight-android">Moonlight</a></th><th><a href="https://www.spacedesk.net/">spacedesk</a></th></tr></thead>
     <tbody>
@@ -387,6 +404,8 @@
   <div class="others">
     <h3>Other current projects</h3>
     <p><a href="https://morespaceapp.com/">MoreSpace</a> (Linux host daemon + Android app) is the closest in scope: a virtual output extended by default, USB or Wi-Fi, GNOME, KDE, wlroots, niri and X11 sessions, pressure-sensitive stylus input. Its documentation does not state tilt or eraser support, the USB protocol it uses, or a license — the site links "Open Source" but no repository — so those cells would read <em>unknown</em>; it also has user accounts, which UScreen does not.</p>
+    <p><a href="https://github.com/princesavsaviya/TethrLink">TethrLink</a> (GPL-3.0) makes a genuine second monitor through GNOME's ScreenCast API, so it is GNOME-on-Wayland only, with X11 falling back to JPEG at the PC's own resolution. Transport is Android <strong>USB tethering</strong> rather than adb, and its README does not mention stylus pressure, tilt or eraser.</p>
+    <p><a href="https://github.com/TarikTopalovic/subdisplay">subdisplay</a> (MIT, one Python file) is glue around Sunshine on the host and Moonlight on the tablet, tested on KDE Wayland. It also needs <strong>USB tethering</strong> — Moonlight's streams are UDP, which adb cannot forward — and a real extended display needs an HDMI dummy plug; otherwise it mirrors. Moonlight carries S Pen pressure but, per the README, not tilt.</p>
     <p class="source-note">Checked against official project documentation in August 2026.</p>
   </div>
 </section>

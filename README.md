@@ -114,7 +114,12 @@ welcome.
 Also current: [MoreSpace](https://morespaceapp.com/) — a Linux host daemon
 with an Android app, extended display by default, USB or Wi-Fi, pressure-
 sensitive stylus; its documentation does not state tilt or eraser support, the
-USB protocol, or a license.
+USB protocol, or a license. [TethrLink](https://github.com/princesavsaviya/TethrLink)
+(GPL-3.0) — a real second monitor via GNOME's ScreenCast API, GNOME Wayland
+only, over USB tethering, stylus not documented.
+[subdisplay](https://github.com/TarikTopalovic/subdisplay) (MIT) — a wrapper
+around Sunshine + Moonlight over USB tethering; a dummy plug for a true
+extended display, pressure but no tilt.
 
 ## Settings
 

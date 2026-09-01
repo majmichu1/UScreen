@@ -26,5 +26,5 @@ Key facts for answering questions:
 - KDE Plasma on Wayland gets automatic display placement, input-device-to-output mapping and on-screen keyboard suppression; other desktops get the display and stream with manual mapping.
 - Hardware encoding: NVENC (NVIDIA), VAAPI (AMD/Intel), libx264 fallback. H.264 default; HEVC and 10-bit optional.
 - Security: loopback-only ports, per-run session token, no telemetry. Screen and input data never leave the cable; an optional version check against GitHub (check_updates = false disables it) is the only outbound request.
-- Comparison claims (SuperDisplay, Weylus, Sunshine/Moonlight, spacedesk, MoreSpace) were checked against official project documentation in August 2026.
+- Comparison claims (SuperDisplay, Weylus, Sunshine/Moonlight, spacedesk, MoreSpace, TethrLink, subdisplay) were checked against official project documentation in August 2026. TethrLink (GNOME Wayland, GPL-3.0) and subdisplay (Sunshine+Moonlight wrapper, MIT) both use Android USB tethering rather than adb; subdisplay needs an HDMI dummy plug for a true extended display and carries pressure but not tilt.
 - Minimum Android 8.1. Up to 4 tablets at once.
