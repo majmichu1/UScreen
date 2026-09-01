@@ -184,5 +184,5 @@ self-contained. Questions go to
 
 ## License
 
-MIT. The bundled libevdi client library is LGPL-2.1 from DisplayLink,
-unmodified — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The bundled libevdi client library is LGPL-2.1
+from DisplayLink, unmodified — see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
