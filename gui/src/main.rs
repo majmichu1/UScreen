@@ -28,6 +28,10 @@ struct FileConfig {
     require_token: bool,
     check_updates: bool,
     max_tablets: u32,
+    /// `ip:port` remembered by `uscreen wifi`. Same rule as `position`: the
+    /// GUI rewrites the whole file, so leaving this out wiped the Wi-Fi
+    /// setup on every save.
+    wifi_address: String,
     auto_resolution: bool,
     video_port: u16,
     input_port: u16,
@@ -50,6 +54,7 @@ impl Default for FileConfig {
             require_token: true,
             check_updates: true,
             max_tablets: 1,
+            wifi_address: String::new(),
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,
@@ -401,6 +406,10 @@ impl eframe::App for App {
         let status = self.status.lock().map(|s| s.clone()).unwrap_or_default();
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            // The settings run longer than a small window, and longer than a
+            // 1080p screen at 100 % once every section is open. Without this
+            // egui simply clips: no scrollbar, and the wheel does nothing (#14).
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.add_space(6.0);
             ui.heading(egui::RichText::new("UScreen").size(26.0));
             ui.label(egui::RichText::new("USB second display for your tablet").weak());
@@ -834,6 +843,7 @@ impl eframe::App for App {
                         .weak()
                         .size(10.0),
                 );
+            });
             });
         });
     }

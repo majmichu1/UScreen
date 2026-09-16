@@ -3,6 +3,15 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
+## Unreleased
+
+- GUI: the settings window scrolls. It was clipped at the window's height with
+  no scrollbar and a dead wheel, so on a small or portrait screen the lower
+  settings were unreachable ([#14](https://github.com/majmichu1/UScreen/issues/14)).
+- Fix: saving settings from the GUI erased the address remembered by
+  `uscreen wifi`, since the GUI rewrites the whole config file and did not
+  know the field yet.
+
 ## 1.2.3 — 2026-09-15
 
 - Fix: the virtual monitor no longer exists while no tablet is attached. The
