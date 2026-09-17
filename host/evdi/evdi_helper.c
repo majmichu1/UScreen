@@ -228,7 +228,7 @@ static inline void convert_strip_scaled(const conv_job_t *j) {
                 csb += b; csg += g; csr += r;
             }
             int ab = csb >> 2, ag = csg >> 2, ar = csr >> 2;
-            int cb = (((-26 * ar - 87 * ag + 112 * ab + 128) >> 8) + 128);
+            int cb = (((-25 * ar - 87 * ag + 112 * ab + 128) >> 8) + 128);
             int cr = (((112 * ar - 102 * ag - 10 * ab + 128) >> 8) + 128);
             if (cb < 0) cb = 0; else if (cb > 255) cb = 255;
             if (cr < 0) cr = 0; else if (cr > 255) cr = 255;
@@ -265,7 +265,7 @@ static inline void convert_strip(const conv_job_t *j) {
             yo1[x+1] = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
             sb += b; sg += g; sr += r;
             int ar = sr >> 2, ag = sg >> 2, ab = sb >> 2;  /* 2x2 chroma average */
-            int cb = (((-26*ar - 87*ag + 112*ab + 128) >> 8) + 128);
+            int cb = (((-25*ar - 87*ag + 112*ab + 128) >> 8) + 128);
             int cr = (((112*ar - 102*ag - 10*ab + 128) >> 8) + 128);
             if (cb < 0) cb = 0; else if (cb > 255) cb = 255;
             if (cr < 0) cr = 0; else if (cr > 255) cr = 255;

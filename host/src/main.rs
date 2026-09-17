@@ -549,7 +549,13 @@ fn other_daemons() -> Vec<u32> {
         let Ok(comm) = std::fs::read_to_string(base.join("comm")) else { continue };
         if comm.trim() != "uscreen" { continue; }
         let Ok(cmd) = std::fs::read(base.join("cmdline")) else { continue };
-        if !cmd.split(|b| *b == 0).any(|a| a == b"start") { continue; }
+        // A daemon is `uscreen start` — or plain `uscreen`, since no
+        // subcommand means start. Only the other subcommands are not daemons.
+        let args: Vec<&[u8]> = cmd.split(|b| *b == 0).skip(1).collect();
+        let other_subcommand = args.iter().any(|a| {
+            matches!(*a, b"stop" | b"status" | b"list-displays" | b"doctor" | b"wifi" | b"--help" | b"-h" | b"--version" | b"-V")
+        });
+        if other_subcommand { continue; }
         // Same user only: another account's daemon is not ours to touch.
         if std::fs::metadata(&base).map(|m| m.uid()).unwrap_or(u32::MAX) != uid { continue; }
         out.push(pid);

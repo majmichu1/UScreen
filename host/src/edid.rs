@@ -158,11 +158,17 @@ pub fn ensure_edid_sized(
         EDID_GENERATION, width, height, refresh, width_mm, height_mm
     ));
     if !path.exists() {
+        // Written next to its final name and renamed into place: a crash
+        // or a full disk half-way through would otherwise leave a short
+        // file with the right name, and every later start would hand the
+        // compositor a truncated EDID and never regenerate it.
+        let tmp = path.with_extension("bin.tmp");
         std::fs::write(
-            &path,
+            &tmp,
             make_edid_sized(width, height, refresh, width_mm, height_mm),
         )
         .context("write EDID")?;
+        std::fs::rename(&tmp, &path).context("place EDID")?;
         tracing::info!(
             "Generated EDID for {}x{}@{} ({}x{}mm) at {:?}",
             width,

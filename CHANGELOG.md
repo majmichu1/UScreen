@@ -3,6 +3,24 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
+## Unreleased
+
+- App: palm rejection works now. Android's hidden `TOOL_TYPE_PALM` is 5; the
+  app compared against 6, so a resting palm was forwarded as a finger and
+  scrolled or clicked things — since the feature was added. A finger that
+  Android reclassifies as a palm mid-gesture is also lifted on the host
+  rather than left pressed.
+- Daemon: a second daemon started as plain `uscreen` (no subcommand) was not
+  recognised as one and could run alongside the first, both fighting for the
+  capture device.
+- Helper: the BT.709 chroma coefficients summed to −1, so pure greys and
+  white carried a one-step blue cast (Cb 127 instead of 128).
+- Daemon: the generated EDID is written to a temporary name and renamed
+  into place, so a crash mid-write can no longer leave a truncated file that
+  every later start would use.
+- App: the frame-arrival ring index wraps instead of overflowing after 2³¹
+  frames (about 14 months of continuous use).
+
 ## 1.2.4 — 2026-09-17
 
 - App: when the decoder keeps stalling it now steps down a ladder instead of

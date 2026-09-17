@@ -146,7 +146,10 @@ class VideoReceiver {
         val i = arrivalWrite % ARRIVAL_RING
         arrivalSeq[i] = seq
         arrivalNanos[i] = System.nanoTime()
-        arrivalWrite = arrivalWrite + 1
+        // Wrapped at a multiple of the ring so the lookups' modulo arithmetic
+        // stays valid; unbounded, it would go negative after 2^31 frames and
+        // index the arrays out of range.
+        arrivalWrite = (arrivalWrite + 1) % (ARRIVAL_RING * 1024)
     }
 
     /** Microseconds between the frame arriving and it being on screen, or -1. */

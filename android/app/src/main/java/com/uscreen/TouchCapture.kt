@@ -15,7 +15,10 @@ class TouchCapture {
     companion object {
         const val TAG = "UScreenTouch"
         const val WS_URL = "ws://127.0.0.1:8891"
-        private const val TOOL_TYPE_PALM = 6
+        // MotionEvent.TOOL_TYPE_PALM is @hide, so it has to be spelled out;
+        // it is 5 in AOSP (0 unknown, 1 finger, 2 stylus, 3 mouse, 4 eraser,
+        // 5 palm). It was 6 here until 1.2.5, so no palm was ever filtered.
+        private const val TOOL_TYPE_PALM = 5
         const val RECONNECT_DELAY_MS = 2000L
     }
 
@@ -241,16 +244,27 @@ class TouchCapture {
                 if (isPenLike(event, actionIndex)) {
                     sendPenEvent(event, actionIndex, 0, vw, vh)
                 } else {
+                    val slot = slotOf(event, actionIndex)
+                    downSlots.add(slot)
                     sendTouch(event.getX(actionIndex) / vw,
                         event.getY(actionIndex) / vh,
                         event.getPressure(actionIndex).toDouble(),
-                        0, slotOf(event, actionIndex))
+                        0, slot)
                 }
             }
 
             MotionEvent.ACTION_MOVE -> {
                 for (i in 0 until pointerCount) {
-                    if (isPalm(event, i)) continue
+                    if (isPalm(event, i)) {
+                        // A finger that Android reclassifies as a palm mid-
+                        // gesture never gets an UP we would forward, so lift
+                        // it now or the Linux side keeps that slot pressed.
+                        val slot = slotOf(event, i)
+                        if (downSlots.remove(slot)) {
+                            sendTouch(event.getX(i) / vw, event.getY(i) / vh, 0.0, 1, slot)
+                        }
+                        continue
+                    }
                     if (isPenLike(event, i)) {
                         // Android batches several samples between frames.
                         // Forward the historical points too, otherwise fast
@@ -287,15 +301,17 @@ class TouchCapture {
 
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_POINTER_UP -> {
-                if (isPalm(event, actionIndex)) {
-                    return true
-                }
                 if (isPenLike(event, actionIndex)) {
                     sendPenEvent(event, actionIndex, 1, vw, vh)
                 } else {
-                    sendTouch(event.getX(actionIndex) / vw,
-                        event.getY(actionIndex) / vh,
-                        0.0, 1, slotOf(event, actionIndex))
+                    // Not filtered on palm: whatever the contact is called
+                    // now, if we sent its DOWN we owe the host its UP.
+                    val slot = slotOf(event, actionIndex)
+                    if (downSlots.remove(slot)) {
+                        sendTouch(event.getX(actionIndex) / vw,
+                            event.getY(actionIndex) / vh,
+                            0.0, 1, slot)
+                    }
                 }
             }
 
@@ -533,6 +549,11 @@ class TouchCapture {
      * comparison is deliberate.
      */
     @android.annotation.SuppressLint("WrongConstant")
+    /** Slots whose DOWN went to the host and whose UP therefore must too. */
+    private val downSlots = HashSet<Int>()
+
+    // Lint only knows the public tool types; PALM is hidden but real.
+    @Suppress("WrongConstant")
     private fun isPalm(event: MotionEvent, index: Int): Boolean =
         event.getToolType(index) == TOOL_TYPE_PALM
 
