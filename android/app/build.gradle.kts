@@ -20,8 +20,8 @@ android {
         applicationId = "com.uscreen"
         minSdk = 27
         targetSdk = 34
-        versionCode = 12
-        versionName = "1.2.3"
+        versionCode = 13
+        versionName = "1.2.4"
     }
 
     if (keystoreProps.isNotEmpty()) {

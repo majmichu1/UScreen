@@ -3693,7 +3693,7 @@ dependencies = [
 
 [[package]]
 name = "uscreen"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3715,7 +3715,7 @@ dependencies = [
 
 [[package]]
 name = "uscreen-gui"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "eframe",
  "serde",

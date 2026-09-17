@@ -3,7 +3,7 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
-## Unreleased
+## 1.2.4 — 2026-09-17
 
 - App: when the decoder keeps stalling it now steps down a ladder instead of
   restarting the same way forever — the hardware decoder, then the hardware
