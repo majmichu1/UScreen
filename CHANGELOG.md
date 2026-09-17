@@ -5,6 +5,19 @@ Full notes for each version are on the
 
 ## Unreleased
 
+- App: when the decoder keeps stalling it now steps down a ladder instead of
+  restarting the same way forever — the hardware decoder, then the hardware
+  decoder without low-latency hints, then Android's software decoder, two
+  stalls per step. One rendered frame no longer counts as recovery, since a
+  decoder that only ever produces keyframes shows exactly one frame per
+  restart, which is what a Galaxy Tab S10 FE+ on Android 16 does with the
+  1.2.3 watchdog: 1 fps, the picture blinking on and off
+  ([#10](https://github.com/majmichu1/UScreen/issues/10)). The decoder's name
+  and output format are logged, so the next `logcat` names the component.
+- App: frame timestamps handed to the decoder advance by 10 ms per frame
+  rather than 1 µs. The host's sequence number still rides in them for the
+  latency loop; the difference is that a decoder which paces or drops frames
+  by timestamp now sees plausible ones.
 - GUI: the settings window scrolls. It was clipped at the window's height with
   no scrollbar and a dead wheel, so on a small or portrait screen the lower
   settings were unreachable ([#14](https://github.com/majmichu1/UScreen/issues/14)).

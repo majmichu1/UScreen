@@ -39,6 +39,8 @@ class VideoReceiver {
          * negligible next to the pen event rate.
          */
         const val ACK_EVERY = 1
+        /** Presentation timestamp step per frame, see ptsFor(). */
+        const val PTS_STEP_US = 10_000L
 
         /** Frames of arrival history kept for the decode-time split. */
         const val ARRIVAL_RING = 64
@@ -83,12 +85,30 @@ class VideoReceiver {
     private val queuedSinceOutput = AtomicInteger(0)
     @Volatile private var lastOutputNanos = 0L
     private var outputStalls = 0
+    private var outputsSinceStall = 0
     /**
-     * Whether to ask for low-latency decoding. Off after the second stall in
-     * a row: those hints are exactly the kind of thing a decoder can accept
-     * and then misbehave on, and a picture that is late beats no picture.
+     * How far down the ladder this decoder has been pushed by stalls:
+     * 0 = the device's hardware decoder with low-latency hints, 1 = the same
+     * without the hints (they are exactly the kind of thing a decoder can
+     * accept and then misbehave on), 2 = Android's software decoder, which is
+     * slow at tablet resolutions but decodes anything. Two stalls at a tier
+     * move to the next; a picture that is late beats no picture, and which
+     * tier finally works says where the fault is.
      */
-    @Volatile private var lowLatencyHints = true
+    @Volatile private var decoderTier = 0
+
+    /**
+     * Sequence number ↔ presentation timestamp. The host's sequence number
+     * rides in the PTS so the render callback can identify the frame, but a
+     * PTS that advances by one microsecond per frame is not a timestamp any
+     * decoder has seen before, and some treat it as the frame being late.
+     * Ten milliseconds a step is monotonic, plausible, and still divides out.
+     */
+    private fun ptsFor(seq: Int): Long = (seq.toLong() and 0xFFFFFFFFL) * PTS_STEP_US
+    private fun seqFromPts(pts: Long): Int = (pts / PTS_STEP_US).toInt()
+
+    private fun softwareDecoderName(): String =
+        if (mimeType == MIME_TYPE_HEVC) "c2.android.hevc.decoder" else "c2.android.avc.decoder"
 
     /**
      * seq → nanoTime the frame finished arriving, so the render callback can
@@ -238,7 +258,7 @@ class VideoReceiver {
 
             // Low latency flags (safe to set, ignored if unsupported) — unless
             // this decoder has already stalled on them, see lowLatencyHints.
-            if (lowLatencyHints) {
+            if (decoderTier == 0) {
                 if (android.os.Build.VERSION.SDK_INT >= 30) {
                     format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
                 }
@@ -257,7 +277,14 @@ class VideoReceiver {
             queuedSinceOutput.set(0)
             lastOutputNanos = System.nanoTime()
 
-            val codec = MediaCodec.createDecoderByType(mimeType)
+            val codec = try {
+                if (decoderTier >= 2) MediaCodec.createByCodecName(softwareDecoderName())
+                else MediaCodec.createDecoderByType(mimeType)
+            } catch (e: Exception) {
+                Log.w(TAG, "Software decoder unavailable, using the device default", e)
+                MediaCodec.createDecoderByType(mimeType)
+            }
+            Log.i(TAG, "Decoder ${codec.name} for $mimeType, tier $decoderTier")
             codec.configure(format, surface, null, 0)
             codec.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT)
 
@@ -269,7 +296,7 @@ class VideoReceiver {
             frameCallbackThread = cbThread
             codec.setOnFrameRenderedListener({ _, presentationTimeUs, _ ->
                 if (renderedCount.incrementAndGet() % ACK_EVERY == 0L) {
-                    val seq = presentationTimeUs.toInt()
+                    val seq = seqFromPts(presentationTimeUs)
                     onFrameRendered?.invoke(seq, decodeMicrosFor(seq))
                 }
             }, Handler(cbThread.looper))
@@ -299,15 +326,20 @@ class VideoReceiver {
                 try {
                     val index = codec.dequeueOutputBuffer(info, 10_000) // 10ms
                     if (index >= 0) {
-                        val seq = info.presentationTimeUs.toInt()
+                        val seq = seqFromPts(info.presentationTimeUs)
                         codec.releaseOutputBuffer(index, true)
                         lastOutputNanos = System.nanoTime()
                         queuedSinceOutput.set(0)
-                        outputStalls = 0
+                        // One frame out is not recovery: a decoder that only
+                        // ever produces keyframes shows exactly one frame per
+                        // restart. Thirty in a row is.
+                        if (++outputsSinceStall >= 30) outputStalls = 0
                         noteReleased(seq)
                         frameCounter.incrementAndGet()
                         rendered++
                         if (rendered <= 2) Log.i(TAG, "Rendered output frame #$rendered")
+                    } else if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        Log.i(TAG, "Decoder output format: ${codec.outputFormat}")
                     }
                 } catch (e: IllegalStateException) {
                     if (codecAlive) Log.w(TAG, "Output thread: codec gone", e)
@@ -448,7 +480,7 @@ class VideoReceiver {
                             feedDecoder(
                                 codec, packetBuf, FRAME_HEADER_SIZE,
                                 frameSize - FRAME_HEADER_SIZE, false,
-                                seq.toLong() and 0xFFFFFFFFL
+                                ptsFor(seq)
                             )
                         }
                         else -> {
@@ -519,14 +551,21 @@ class VideoReceiver {
                         val silentNs = System.nanoTime() - lastOutputNanos
                         if (queued >= 4 && silentNs > 1_500_000_000L) {
                             outputStalls++
-                            val dropHints = outputStalls >= 2 && lowLatencyHints
+                            outputsSinceStall = 0
+                            if (outputStalls >= 2 && decoderTier < 2) {
+                                decoderTier++
+                                outputStalls = 0
+                            }
                             Log.w(
                                 TAG,
                                 "Decoder took $queued frames and showed none for " +
-                                    "${silentNs / 1_000_000} ms — restarting" +
-                                    (if (dropHints) " without low-latency hints" else "")
+                                    "${silentNs / 1_000_000} ms — restarting as " +
+                                    when (decoderTier) {
+                                        0 -> "the hardware decoder"
+                                        1 -> "the hardware decoder without low-latency hints"
+                                        else -> "the software decoder"
+                                    }
                             )
-                            if (dropHints) lowLatencyHints = false
                             // A fresh decoder needs the codec config and a
                             // keyframe again, and the host sends both to a
                             // client that (re)connects — so drop the socket
