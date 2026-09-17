@@ -1,6 +1,6 @@
 [package]
 name = "uscreen-gui"
-version = "1.2.4"
+version = "1.2.5"
 edition = "2021"
 description = "Settings and status GUI for the uscreen USB display server"
 

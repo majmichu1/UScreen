@@ -3,7 +3,7 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
-## Unreleased
+## 1.2.5 — 2026-09-17
 
 - App: palm rejection works now. Android's hidden `TOOL_TYPE_PALM` is 5; the
   app compared against 6, so a resting palm was forwarded as a finger and
