@@ -4,6 +4,7 @@ mod doctor;
 mod edid;
 #[cfg(feature = "inproc-encoder")]
 mod encoder;
+mod encoders;
 mod kwin;
 mod input;
 mod latency;
@@ -188,7 +189,32 @@ async fn run_daemon(cli: Cli) -> Result<()> {
             }
         }
     }
-    let encoder = cli.encoder.clone().unwrap_or(file_cfg.encoder.clone());
+    // Trust the configured encoder only once it has encoded a frame. A fresh
+    // config says h264_nvenc, and on a machine without NVIDIA that used to
+    // mean ffmpeg dying on every start while the tablet showed a spinner
+    // forever (#15). A CLI flag is an explicit request and is left alone.
+    let encoder = match cli.encoder.clone() {
+        Some(e) => e,
+        None => match encoders::resolve(&file_cfg.encoder).await {
+            Some(e) => {
+                if e != file_cfg.encoder {
+                    let mut fixed = file_cfg.clone();
+                    fixed.encoder = e.clone();
+                    match fixed.save() {
+                        Ok(_) => info!("Saved encoder = {} to the config", e),
+                        Err(err) => warn!("Could not save the encoder choice: {}", err),
+                    }
+                }
+                e
+            }
+            None => anyhow::bail!(
+                "No working H.264 encoder: ffmpeg could not encode a frame with any of {}. \
+                 On Fedora, ffmpeg from RPM Fusion is needed; elsewhere check that ffmpeg \
+                 is the full build.",
+                encoders::CANDIDATES.join(", ")
+            ),
+        },
+    };
     let fps = cli.fps.unwrap_or(file_cfg.fps);
     let bitrate = cli.bitrate.unwrap_or(file_cfg.bitrate);
     let width = cli.width.unwrap_or(file_cfg.width);

@@ -837,13 +837,15 @@ impl eframe::App for App {
                 ui.label(egui::RichText::new(&self.message).weak());
             }
 
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                ui.label(
-                    egui::RichText::new(format!("config: {}", config_path().display()))
-                        .weak()
-                        .size(10.0),
-                );
-            });
+            // In the flow, not pinned to the bottom: a bottom-up layout
+            // inside a scroll area put this on top of whatever the last
+            // line was — the status message, in the report (#16).
+            ui.add_space(12.0);
+            ui.label(
+                egui::RichText::new(format!("config: {}", config_path().display()))
+                    .weak()
+                    .size(10.0),
+            );
             });
         });
     }

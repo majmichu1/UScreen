@@ -150,25 +150,36 @@ async fn check_tools(r: &mut Report, cfg: &FileConfig) {
         }
     }
 
-    if let Some(list) = output_of("ffmpeg", &["-hide_banner", "-encoders"]).await {
-        let has = |name: &str| list.lines().any(|l| l.split_whitespace().any(|t| t == name));
-        if has(&cfg.encoder) {
+    // By actually encoding a frame: `ffmpeg -encoders` lists what ffmpeg was
+    // built with, and a distribution build is built with everything. An AMD
+    // laptop had h264_nvenc "available" by that measure (#15).
+    if output_of("ffmpeg", &["-version"]).await.is_some() {
+        if crate::encoders::works(&cfg.encoder).await {
             r.line(
                 Level::Ok,
                 "configured encoder",
-                &format!("{} available", cfg.encoder),
+                &format!("{} encodes a test frame", cfg.encoder),
             );
         } else {
             r.line(
                 Level::Fail,
                 "configured encoder",
-                &format!("{} NOT available in ffmpeg", cfg.encoder),
+                &format!("{} cannot encode on this machine", cfg.encoder),
             );
-            let alternatives: Vec<&str> = ["h264_nvenc", "h264_vaapi", "libx264"]
-                .into_iter()
-                .filter(|e| has(e))
-                .collect();
-            r.hint(&format!("available instead: {}", alternatives.join(", ")));
+            let mut alternatives = Vec::new();
+            for e in crate::encoders::CANDIDATES {
+                if e != cfg.encoder && crate::encoders::works(e).await {
+                    alternatives.push(e);
+                }
+            }
+            if alternatives.is_empty() {
+                r.hint("no H.264 encoder works at all — on Fedora, install ffmpeg from RPM Fusion");
+            } else {
+                r.hint(&format!(
+                    "works here: {} — the daemon switches to the first of these by itself on start",
+                    alternatives.join(", ")
+                ));
+            }
         }
     }
 }

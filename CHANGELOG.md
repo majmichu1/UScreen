@@ -3,6 +3,19 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
+## Unreleased
+
+- The daemon checks that the configured encoder can actually encode a frame
+  before using it, and switches to the first one that can (NVENC, then VAAPI,
+  then libx264), saving the choice. A fresh config said `h264_nvenc`, and on
+  a machine without NVIDIA that meant ffmpeg dying on every start while the
+  tablet showed a spinner forever
+  ([#15](https://github.com/majmichu1/UScreen/issues/15)). `uscreen doctor`
+  checks the same way instead of trusting `ffmpeg -encoders`, which lists
+  what ffmpeg was built with rather than what works.
+- GUI: the config path no longer draws on top of the status message
+  ([#16](https://github.com/majmichu1/UScreen/issues/16)).
+
 ## 1.2.5 — 2026-09-17
 
 - App: palm rejection works now. Android's hidden `TOOL_TYPE_PALM` is 5; the
