@@ -3,7 +3,7 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
-## Unreleased
+## 1.2.6 — 2026-09-19
 
 - New setting `pointer_handoff` (GUI: *Leave the mouse cursor where the pen
   was lifted*). On, as before, the pen parks the desktop cursor where it was

@@ -6,7 +6,7 @@ Reference setup: Bazzite (Fedora Atomic) with KDE Plasma 6 on Wayland and an NVI
 
 Verified systems: Bazzite + KDE Plasma 6 Wayland + NVIDIA (maintainer, all benchmarks). Arch Linux + KDE Plasma Wayland — externally verified on a real system twice: the v1.0.2 installer (https://github.com/majmichu1/UScreen/issues/2#issuecomment-5478643599) and the v1.1.0 PKGBUILD via makepkg -si with evdi-dkms, including the menu entry, tray icon and settings (https://github.com/majmichu1/UScreen/issues/3#issuecomment-5494961262). A bug from that report — input staying mapped to the laptop screen after leaving graphics-tablet mode (https://github.com/majmichu1/UScreen/issues/6) — is fixed in 1.2.0. Fedora 44 + KDE Plasma with a Samsung Galaxy Tab S9 FE — external report, works "near perfectly" for drawing (https://github.com/majmichu1/UScreen/discussions/7). Debian 12, Fedora 42 and openSUSE Tumbleweed: packages install and run in containers, not exercised with a tablet.
 
-Maintainer: majmichu1 (https://github.com/majmichu1). Current version: 1.2.5 (2026-09-17). Last verified: 2026-09-17. Canonical links:
+Maintainer: majmichu1 (https://github.com/majmichu1). Current version: 1.2.6 (2026-09-19). Last verified: 2026-09-19. Canonical links:
 
 - Website: https://majmichu1.github.io/UScreen/
 - Source: https://github.com/majmichu1/UScreen
