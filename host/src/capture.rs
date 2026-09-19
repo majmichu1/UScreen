@@ -984,10 +984,15 @@ impl CaptureManager {
                 if needs_helper_restart {
                     // fps is baked into the helper's pacing, and the
                     // resolution into the EDID — restart with a fresh EDID
+                    // Including the physical size: it goes into the EDID, so
+                    // a change of a millimetre restarts the helper just as a
+                    // resolution change does — and printing only w/h/fps made
+                    // that look like a restart for no reason at all.
                     info!(
-                        "Display mode change: {}x{}@{} → {}x{}@{}",
+                        "Display mode change: {}x{}@{} ({}x{}mm) → {}x{}@{} ({}x{}mm)",
                         self.config.width, self.config.height, self.config.fps,
-                        s.width, s.height, s.fps
+                        self.config.width_mm, self.config.height_mm,
+                        s.width, s.height, s.fps, s.width_mm, s.height_mm
                     );
                     if let Some(mut h) = self.helper_child.take() {
                         let _ = h.start_kill();

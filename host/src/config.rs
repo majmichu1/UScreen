@@ -29,6 +29,40 @@ pub const DEFAULT_QUALITY: u32 = 18;
 pub const MIN_QUALITY: u32 = 12;
 pub const MAX_QUALITY: u32 = 32;
 
+/// What one tablet reported about itself, and anything set specifically for
+/// it, keyed in the config by its adb serial.
+///
+/// Two tablets are rarely the same size, and the panel size goes into the
+/// EDID, so without this the daemon starts every session with whatever the
+/// last tablet was and rebuilds the display as soon as this one says what it
+/// really is — several helper restarts and, on a slow machine, half a minute
+/// before the first picture. Remembering per serial builds the right display
+/// first time, and is the natural place to hang per-tablet settings.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(default)]
+pub struct TabletProfile {
+    /// Model name, so the file reads sensibly to a human.
+    pub label: String,
+    pub width: u32,
+    pub height: u32,
+    /// Panel size in millimetres; feeds the EDID and so the desktop's scale.
+    pub width_mm: u32,
+    pub height_mm: u32,
+    /// Set only where this tablet should differ from the global settings.
+    pub fps: Option<u32>,
+    pub bitrate: Option<u32>,
+    pub quality: Option<u32>,
+    pub stream_scale: Option<u32>,
+    pub position: Option<String>,
+}
+
+impl TabletProfile {
+    /// Whether this tablet's own dimensions are known.
+    pub fn has_display(&self) -> bool {
+        self.width > 0 && self.height > 0
+    }
+}
+
 /// Persistent settings, shared by the CLI daemon, the GUI and the tablet app
 /// (which pushes changes over the input WebSocket).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -87,6 +121,9 @@ pub struct FileConfig {
     /// reconnect to it by itself, so the tablet comes back as a screen
     /// without anyone typing an adb command. Empty disables that.
     pub wifi_address: String,
+    /// Remembered per tablet, keyed by adb serial. Written when a tablet
+    /// reports its panel, read the next time that tablet is plugged in.
+    pub tablets: std::collections::HashMap<String, TabletProfile>,
     /// Leave an ordinary mouse cursor where the pen was lifted. A tablet
     /// tool's cursor disappears when it leaves proximity, which loses the
     /// place you were pointing at; the "UScreen Pointer" device parks the
@@ -121,6 +158,7 @@ impl Default for FileConfig {
             check_updates: true,
             max_tablets: 1,
             wifi_address: String::new(),
+            tablets: std::collections::HashMap::new(),
             pointer_handoff: true,
             auto_resolution: true,
             video_port: 8890,

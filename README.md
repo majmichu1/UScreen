@@ -143,7 +143,10 @@ Everything lives in `~/.config/uscreen/config.toml` and is reachable from
   8-bit, so it adds precision, not colour; it is not HDR.
 - **Stream scale** — `stream_scale = 2` sends a quarter of the pixels for a
   ~6 ms lower decode time at the cost of softer text.
-- **Several tablets** — `max_tablets` up to 4, each its own screen.
+- **Several tablets** — `max_tablets` up to 4, each its own screen. Each is
+  remembered by its serial in a `[tablets.<serial>]` block: its panel size, so
+  the right display is built the moment it is plugged in, and optionally its
+  own `fps`, `bitrate`, `quality`, `stream_scale` or `position`.
 - **Wi-Fi** — `uscreen wifi` once, with the cable in: it switches the tablet
   over, remembers the address and reconnects to it by itself whenever the
   cable is out. `uscreen wifi --off` undoes it. The daemon prefers the cable

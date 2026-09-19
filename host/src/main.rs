@@ -408,7 +408,12 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         cli.stream_scale.is_some(),
     );
 
+    // Which tablet the settings being saved belong to, so they can be
+    // remembered per device as well as globally.
+    let (serial_tx, serial_rx) = watch::channel(None::<String>);
+
     // Persist settings changes pushed at runtime back to the config file
+    let serial_rx_save = serial_rx.clone();
     let mut settings_rx_save = settings_rx.clone();
     let save_handle = tokio::spawn(async move {
         while settings_rx_save.changed().await.is_ok() {
@@ -421,6 +426,19 @@ async fn run_daemon(cli: Cli) -> Result<()> {
             if !cli_overrides.4 { cfg.height = s.height; }
             if !cli_overrides.5 { cfg.quality = s.quality; }
             if !cli_overrides.6 { cfg.stream_scale = s.stream_scale; }
+            // And against this tablet's serial, so the next session with it
+            // builds the right display immediately instead of rebuilding.
+            if let Some(serial) = serial_rx_save.borrow().clone() {
+                let p = cfg.tablets.entry(serial).or_default();
+                if s.width > 0 && s.height > 0 {
+                    p.width = s.width;
+                    p.height = s.height;
+                }
+                if s.width_mm > 0 && s.height_mm > 0 {
+                    p.width_mm = s.width_mm;
+                    p.height_mm = s.height_mm;
+                }
+            }
             if let Err(e) = cfg.save() {
                 warn!("Failed to persist settings: {}", e);
             } else {
@@ -493,8 +511,9 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         shutdown_rx: shutdown_tx.subscribe(),
     };
     let wifi_address = file_cfg.wifi_address.clone();
+    let settings_tx_adb = settings_tx.clone();
     let adb_handle = tokio::spawn(async move {
-        adb_monitor(video_port, input_port, auto_launch, tablet_tx, adb_token, relaunch, extra, wifi_address).await;
+        adb_monitor(video_port, input_port, auto_launch, tablet_tx, adb_token, relaunch, extra, wifi_address, settings_tx_adb, serial_tx).await;
     });
 
     println!();
@@ -862,6 +881,8 @@ async fn adb_monitor(
     extra: ExtraSessionTemplate,
     // `ip:port` remembered by `uscreen wifi`, or empty.
     wifi_address: String,
+    settings_tx: watch::Sender<capture::EncoderSettings>,
+    serial_tx: watch::Sender<Option<String>>,
 ) {
     let mut current: Option<String> = None;
     let mut last_relaunch = std::time::Instant::now() - std::time::Duration::from_secs(60);
@@ -914,6 +935,8 @@ async fn adb_monitor(
                     serial
                 );
                 announce_transport(serial);
+                let _ = serial_tx.send(Some(serial.clone()));
+                apply_tablet_profile(serial, &settings_tx).await;
                 if !is_fake_serial(serial) {
                     on_tablet_connected(serial, video_port, input_port, auto_launch, token.as_deref()).await;
                 }
@@ -937,6 +960,8 @@ async fn adb_monitor(
                     info!("Different tablet connected ({} → {})", old, serial);
                 }
                 announce_transport(serial);
+                let _ = serial_tx.send(Some(serial.clone()));
+                apply_tablet_profile(serial, &settings_tx).await;
                 on_tablet_connected(serial, video_port, input_port, auto_launch, token.as_deref()).await;
                 let _ = tablet_tx.send(true);
                 current = found.clone();
@@ -945,6 +970,7 @@ async fn adb_monitor(
             }
             (Some(old), None) => {
                 info!("Tablet disconnected ({})", old);
+                let _ = serial_tx.send(None);
                 let _ = tablet_tx.send(false);
                 current = None;
             }
@@ -1174,6 +1200,57 @@ async fn tablet_ip(serial: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Set up the display this tablet had last time, before anything is built.
+///
+/// Without it the helper comes up with the previous tablet's mode and EDID,
+/// the app reports the real panel a second later, and the whole pipeline is
+/// torn down and rebuilt — twice, since the physical size arrives with it.
+/// On a slow machine that was half a minute of black screen at every start.
+async fn apply_tablet_profile(serial: &str, settings_tx: &watch::Sender<capture::EncoderSettings>) {
+    let mut cfg = config::FileConfig::load();
+    let Some(p) = cfg.tablets.get(serial).cloned() else {
+        // First time this tablet is seen: note it, so the file shows what is
+        // known even before it has reported anything.
+        if !is_fake_serial(serial) {
+            let label = tokio::process::Command::new("adb")
+                .args(["-s", serial, "shell", "getprop", "ro.product.model"])
+                .output()
+                .await
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+            cfg.tablets.entry(serial.to_string()).or_default().label = label;
+            let _ = cfg.save();
+        }
+        return;
+    };
+    if !p.has_display() {
+        return;
+    }
+    let mut s = settings_tx.borrow().clone();
+    let before = (s.width, s.height, s.width_mm, s.height_mm, s.fps, s.bitrate, s.quality, s.stream_scale);
+    s.width = p.width;
+    s.height = p.height;
+    if p.width_mm > 0 && p.height_mm > 0 {
+        s.width_mm = p.width_mm;
+        s.height_mm = p.height_mm;
+    }
+    if let Some(v) = p.fps { s.fps = v; }
+    if let Some(v) = p.bitrate { s.bitrate = v; }
+    if let Some(v) = p.quality { s.quality = v; }
+    if let Some(v) = p.stream_scale { s.stream_scale = v.max(1); }
+    if before == (s.width, s.height, s.width_mm, s.height_mm, s.fps, s.bitrate, s.quality, s.stream_scale) {
+        return;
+    }
+    info!(
+        "Known tablet {}{}: {}x{} ({}x{} mm) — building the display for it straight away",
+        serial,
+        if p.label.is_empty() { String::new() } else { format!(" ({})", p.label) },
+        s.width, s.height, s.width_mm, s.height_mm
+    );
+    let _ = settings_tx.send(s);
 }
 
 /// Whether the app's process exists on the tablet. `None` when adb could not

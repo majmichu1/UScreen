@@ -32,6 +32,10 @@ struct FileConfig {
     /// GUI rewrites the whole file, so leaving this out wiped the Wi-Fi
     /// setup on every save.
     wifi_address: String,
+    /// Per-tablet profiles. The GUI does not edit them, but it rewrites the
+    /// whole file, so a field it does not know is a field it deletes.
+    #[serde(default)]
+    tablets: toml::value::Table,
     /// Mirrors the daemon's field; see the rule above about unknown fields.
     pointer_handoff: bool,
     auto_resolution: bool,
@@ -57,6 +61,7 @@ impl Default for FileConfig {
             check_updates: true,
             max_tablets: 1,
             wifi_address: String::new(),
+            tablets: toml::value::Table::new(),
             pointer_handoff: true,
             auto_resolution: true,
             video_port: 8890,

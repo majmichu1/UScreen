@@ -5,6 +5,15 @@ Full notes for each version are on the
 
 ## Unreleased
 
+- Each tablet is remembered by its serial. The panel it reported is written to
+  a `[tablets.<serial>]` block in the config and used the next time that tablet
+  is plugged in, so the display is built for it straight away instead of coming
+  up as the previous tablet and being torn down and rebuilt a second later —
+  one helper start instead of two here, and on a slow laptop that was most of
+  the half-minute before the first picture
+  ([#17](https://github.com/majmichu1/UScreen/issues/17)). The block also takes
+  `fps`, `bitrate`, `quality`, `stream_scale` and `position` for a tablet that
+  should differ from the global settings.
 - App: palm rejection really works now. The tablet does not report a resting
   hand as `TOOL_TYPE_PALM` at all — it arrives as an ordinary finger, which is
   why the desktop scrolled and opened windows by itself while drawing. Fingers
