@@ -29,6 +29,12 @@ One change per PR. Describe how you tested it and on what hardware. If it
 touches the protocol between app and daemon, update both and say so — they
 ship together.
 
+## When fixes ship
+
+Releases are weekly, on Saturday evenings; a fix lands on `main` when it is
+ready and waits there under *Unreleased* in the changelog. Only a fix that
+unblocks people who cannot use UScreen at all goes out on its own.
+
 ## Good first issues
 
 Issues tagged `good first issue` are self-contained and come with pointers to

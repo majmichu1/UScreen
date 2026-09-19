@@ -131,6 +131,10 @@ Everything lives in `~/.config/uscreen/config.toml` and is reachable from
   streamed, the pen drives your own screen, zero display latency. Switch back
   the same way; no restart.
 - **Position** — `right` (default), `left`, `above`, `below` your real screens.
+- **Pen and mouse** — `pointer_handoff = false` (or the checkbox in the GUI)
+  stops the pen from moving the desktop cursor: pen and touch drive the
+  tablet's screen, the mouse stays where it was. On by default, which leaves
+  an ordinary cursor where the pen was lifted.
 - **Orientation** — in the tablet's ⚙ sheet: rotate automatically with the
   tilt sensor, or pin *camera up* / *camera down*.
 - **Codec** — `h264_nvenc` by default because every device decodes it;
@@ -181,6 +185,17 @@ More in [docs/faq.md](docs/faq.md).
 - [Architecture and protocol](docs/architecture.md) · [Development, building, releasing](docs/development.md)
 - [Benchmarks](docs/benchmarks.md) · [Compatibility](docs/compatibility.md) · [FAQ](docs/faq.md)
 - [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
+
+## Releases
+
+Regular releases go out **on Saturday evenings (European time)**, with
+everything fixed that week; the [changelog](CHANGELOG.md) collects it under
+*Unreleased* until then. A fix ships straight away only when people cannot use
+UScreen without it — a broken install, a black screen on a common setup. If
+you need something sooner, `main` is always buildable
+([docs/development.md](docs/development.md)).
+
+Update the Linux side and the APK together; they are versioned as one.
 
 ## Roadmap
 

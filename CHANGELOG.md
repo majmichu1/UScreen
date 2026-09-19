@@ -5,6 +5,14 @@ Full notes for each version are on the
 
 ## Unreleased
 
+- New setting `pointer_handoff` (GUI: *Leave the mouse cursor where the pen
+  was lifted*). On, as before, the pen parks the desktop cursor where it was
+  lifted; off, no "UScreen Pointer" device is created at all, so the pen and
+  touch drive only the tablet's screen and the mouse stays where it was —
+  no more dragging the cursor back from the tablet to carry on working
+  ([#18](https://github.com/majmichu1/UScreen/issues/18)). The misplaced
+  cursor on mixed-scale layouts reported there is not fixed yet; turning the
+  handoff off avoids it.
 - The daemon checks that the configured encoder can actually encode a frame
   before using it, and switches to the first one that can (NVENC, then VAAPI,
   then libx264), saving the choice. A fresh config said `h264_nvenc`, and on

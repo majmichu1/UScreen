@@ -82,6 +82,8 @@ pub struct DeviceIdentity {
     pub product_touch: u16,
     pub product_pen: u16,
     pub product_pointer: u16,
+    /// How many of the three devices exist: 2 when pointer_handoff is off.
+    pub device_count: usize,
 }
 
 impl DeviceIdentity {
@@ -95,6 +97,7 @@ impl DeviceIdentity {
             product_touch: PRODUCT_TOUCH + base,
             product_pen: PRODUCT_PEN + base,
             product_pointer: PRODUCT_POINTER + base,
+            device_count: 3,
         }
     }
     fn owns(&self, name: &str) -> bool {
@@ -226,6 +229,9 @@ pub struct InputConfig {
     pub codec: String,
     pub virtual_width: u32,
     pub virtual_height: u32,
+    /// Whether to create the "UScreen Pointer" device at all; see
+    /// `FileConfig::pointer_handoff`.
+    pub pointer_handoff: bool,
 }
 
 impl Default for InputConfig {
@@ -237,6 +243,7 @@ impl Default for InputConfig {
             codec: "h264".into(),
             virtual_width: 2960,
             virtual_height: 1848,
+            pointer_handoff: true,
         }
     }
 }
@@ -770,7 +777,7 @@ async fn map_devices_to_output(pen_only: bool, ident: &DeviceIdentity, card: Opt
             }
         }
 
-        if mapped >= 3 {
+        if mapped >= ident.device_count {
             return;
         }
     }
@@ -916,8 +923,12 @@ impl InputServer {
         //
         // Device creation sleeps to let udev settle, so it runs off the async
         // runtime rather than blocking a worker thread.
-        let ident = DeviceIdentity::for_instance(self.config.instance);
+        let mut ident = DeviceIdentity::for_instance(self.config.instance);
+        if !self.config.pointer_handoff {
+            ident.device_count = 2;
+        }
         let ident_bg = ident.clone();
+        let pointer_handoff = self.config.pointer_handoff;
         let devices = tokio::task::spawn_blocking(move || {
             let touch = match UInputDevice::new_touch(&ident_bg.touch, ident_bg.product_touch) {
                 Ok(dev) => Some(dev),
@@ -933,11 +944,16 @@ impl InputServer {
                     None
                 }
             };
-            let pointer = match UInputDevice::new_pointer(&ident_bg.pointer, ident_bg.product_pointer) {
-                Ok(dev) => Some(dev),
-                Err(e) => {
-                    warn!("No pointer device: {}. The cursor will vanish when the pen lifts.", e);
-                    None
+            let pointer = if !pointer_handoff {
+                info!("pointer_handoff is off — the pen will not move the desktop cursor");
+                None
+            } else {
+                match UInputDevice::new_pointer(&ident_bg.pointer, ident_bg.product_pointer) {
+                    Ok(dev) => Some(dev),
+                    Err(e) => {
+                        warn!("No pointer device: {}. The cursor will vanish when the pen lifts.", e);
+                        None
+                    }
                 }
             };
             InjectDevices {

@@ -87,6 +87,15 @@ pub struct FileConfig {
     /// reconnect to it by itself, so the tablet comes back as a screen
     /// without anyone typing an adb command. Empty disables that.
     pub wifi_address: String,
+    /// Leave an ordinary mouse cursor where the pen was lifted. A tablet
+    /// tool's cursor disappears when it leaves proximity, which loses the
+    /// place you were pointing at; the "UScreen Pointer" device parks the
+    /// desktop cursor there instead. The price is that the shared cursor now
+    /// sits on the tablet's screen and has to be brought back with the mouse,
+    /// and on mixed-scale layouts KWin places an absolute pointer slightly
+    /// off (#18). `false` creates no such device: the pen and touch drive
+    /// the tablet's screen, the mouse stays wherever it was.
+    pub pointer_handoff: bool,
     /// Match the virtual display to whatever resolution the tablet reports
     pub auto_resolution: bool,
     pub video_port: u16,
@@ -112,6 +121,7 @@ impl Default for FileConfig {
             check_updates: true,
             max_tablets: 1,
             wifi_address: String::new(),
+            pointer_handoff: true,
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,

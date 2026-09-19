@@ -275,6 +275,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         codec: capture::Codec::from_encoder(&encoder).muxer().to_string(),
         virtual_width: width,
         virtual_height: height,
+        pointer_handoff: file_cfg.pointer_handoff,
     };
 
     // Which of the two jobs the tablet is doing. Switchable at runtime from
@@ -777,6 +778,7 @@ fn spawn_extra_session(t: &ExtraSessionTemplate, instance: u32) -> ExtraSession 
             codec: t.codec.clone(),
             virtual_width: cfg.width,
             virtual_height: cfg.height,
+            pointer_handoff: config::FileConfig::load().pointer_handoff,
         },
         Some(settings_tx),
         t.mode_tx.clone(),

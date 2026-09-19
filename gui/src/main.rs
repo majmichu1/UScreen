@@ -32,6 +32,8 @@ struct FileConfig {
     /// GUI rewrites the whole file, so leaving this out wiped the Wi-Fi
     /// setup on every save.
     wifi_address: String,
+    /// Mirrors the daemon's field; see the rule above about unknown fields.
+    pointer_handoff: bool,
     auto_resolution: bool,
     video_port: u16,
     input_port: u16,
@@ -55,6 +57,7 @@ impl Default for FileConfig {
             check_updates: true,
             max_tablets: 1,
             wifi_address: String::new(),
+            pointer_handoff: true,
             auto_resolution: true,
             video_port: 8890,
             input_port: 8891,
@@ -791,6 +794,14 @@ impl eframe::App for App {
                         ui.checkbox(
                             &mut self.cfg.auto_launch_app,
                             "Open the app on the tablet automatically",
+                        );
+                        ui.checkbox(
+                            &mut self.cfg.pointer_handoff,
+                            "Leave the mouse cursor where the pen was lifted",
+                        )
+                        .on_hover_text(
+                            "Off: the pen and touch only drive the tablet's screen, \
+                             and the mouse cursor stays wherever it was.",
                         );
                         let mut auto = status.autostart;
                         if ui
