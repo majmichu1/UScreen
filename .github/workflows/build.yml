@@ -59,13 +59,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      # No SDK setup step: the hosted runners ship the Android SDK with its
+      # licences accepted, and Gradle finds it through ANDROID_HOME. The
+      # setup-android action started failing on the licence prompt in
+      # September 2026 and took every build red with it.
 
       - name: Build debug APK
         run: |

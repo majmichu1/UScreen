@@ -31,7 +31,7 @@ ship together.
 
 ## When fixes ship
 
-Releases are weekly, on Saturday evenings; a fix lands on `main` when it is
+Releases are weekly, on Saturday evenings US Eastern time; a fix lands on `main` when it is
 ready and waits there under *Unreleased* in the changelog. Only a fix that
 unblocks people who cannot use UScreen at all goes out on its own.
 

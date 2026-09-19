@@ -188,7 +188,7 @@ More in [docs/faq.md](docs/faq.md).
 
 ## Releases
 
-Regular releases go out **on Saturday evenings (European time)**, with
+Regular releases go out **on Saturday evenings (US Eastern time)**, with
 everything fixed that week; the [changelog](CHANGELOG.md) collects it under
 *Unreleased* until then. A fix ships straight away only when people cannot use
 UScreen without it — a broken install, a black screen on a common setup. If
