@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <defs>
+    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f0a742" stop-opacity=".10"/>
+      <stop offset="60%" stop-color="#f0a742" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="lap"><rect x="754" y="212" width="232" height="150" rx="3"/></clipPath>
+    <clipPath id="tab"><rect x="1032" y="248" width="150" height="100" rx="4"/></clipPath>
+  </defs>
+
+  <rect width="1280" height="640" fill="#141311"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+
+  <!-- left column: the words -->
+  <text x="80" y="150" font-family="IBM Plex Mono, monospace" font-size="19" letter-spacing="3"
+        fill="#f0a742">OPEN SOURCE · MIT · LINUX + ANDROID</text>
+
+  <text x="80" y="252" font-family="Instrument Serif, Georgia, serif" font-size="82" fill="#ece8df">UScreen</text>
+  <text x="80" y="330" font-family="Instrument Serif, Georgia, serif" font-size="46" fill="#ece8df">Your Android tablet,</text>
+  <text x="80" y="386" font-family="Instrument Serif, Georgia, serif" font-size="46" fill="#ece8df">as a <tspan font-style="italic" fill="#f0a742">real</tspan> second monitor.</text>
+
+  <text x="80" y="450" font-family="IBM Plex Sans, Helvetica, sans-serif" font-size="25" fill="#a8a399">Over one USB cable, with S Pen pressure and tilt.</text>
+
+  <!-- three facts -->
+  <g font-family="IBM Plex Mono, monospace" font-size="21" fill="#8a867d">
+    <text x="80" y="528">22 ms</text>
+    <text x="300" y="528">EVDI</text>
+    <text x="520" y="528">no dummy plug</text>
+  </g>
+  <g font-family="IBM Plex Mono, monospace" font-size="14" fill="#5f5c55">
+    <text x="80" y="552">median, measured</text>
+    <text x="300" y="552">a real display</text>
+    <text x="520" y="552">no Wi-Fi, no tethering</text>
+  </g>
+
+  <line x1="80" y1="580" x2="1200" y2="580" stroke="#2e2c27" stroke-width="1"/>
+  <text x="80" y="612" font-family="IBM Plex Mono, monospace" font-size="17" fill="#8a867d">github.com/majmichu1/UScreen</text>
+
+  <!-- right: laptop + tablet over a cable -->
+  <g>
+    <rect x="748" y="206" width="244" height="162" rx="6" fill="#1c1b18" stroke="#4a4740"/>
+    <g clip-path="url(#lap)">
+      <rect x="754" y="212" width="232" height="150" fill="#22211d"/>
+      <rect x="766" y="228" width="128" height="86" rx="2" fill="#2b2a25" stroke="#3d3b35"/>
+      <rect x="766" y="228" width="128" height="12" fill="#3a3832"/>
+      <rect x="904" y="228" width="70" height="52" rx="2" fill="#2b2a25" stroke="#3d3b35"/>
+      <rect x="766" y="324" width="208" height="8" rx="2" fill="#2b2a25"/>
+    </g>
+    <rect x="726" y="368" width="288" height="9" rx="3" fill="#1c1b18" stroke="#4a4740"/>
+
+    <!-- tablet, amber framed: the one that matters -->
+    <rect x="1026" y="242" width="162" height="112" rx="7" fill="#1c1b18" stroke="#f0a742" stroke-width="2"/>
+    <g clip-path="url(#tab)">
+      <rect x="1032" y="248" width="150" height="100" fill="#22211d"/>
+      <rect x="1044" y="262" width="74" height="54" rx="2" fill="#2b2a25" stroke="#3d3b35"/>
+      <rect x="1044" y="262" width="74" height="9" fill="#3a3832"/>
+      <path d="M1128 322 l34 -34" stroke="#ece8df" stroke-width="5" stroke-linecap="round"/>
+      <path d="M1124 326 l6 -6 4 4 -6 6 z" fill="#f0a742"/>
+    </g>
+
+    <!-- the cable -->
+    <path d="M992 300 C1006 300 1012 298 1026 298" stroke="#f0a742" stroke-width="3"
+          fill="none" stroke-dasharray="6 8" stroke-linecap="round"/>
+  </g>
+</svg>

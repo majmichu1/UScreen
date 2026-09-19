@@ -603,6 +603,16 @@ struct InjectDevices {
     /// the user last pointed instead of vanishing.
     pointer: Option<UInputDevice>,
     last_pen_pos: (i32, i32),
+    /// Where the output the pen addresses sits on the desktop, as fractions
+    /// of the whole desktop: (x, y, width, height).
+    ///
+    /// The pen is a tablet tool and KWin puts it inside the output named in
+    /// `outputName`. The plain absolute pointer is not a tablet tool, and
+    /// KWin spreads it across the entire desktop whatever that property
+    /// says — so parking it at the pen's own coordinates dropped the cursor
+    /// somewhere else entirely, further left and lower the larger the rest
+    /// of the desktop was (#18). Converting here puts it where the pen was.
+    pointer_area: Option<(f64, f64, f64, f64)>,
     /// Bitmask of MT slots that currently have an active tracking ID
     /// (DOWN received, no matching UP yet). Bit N → slot N, up to slot 15.
     active_slots: u16,
@@ -707,7 +717,7 @@ async fn kwin_device_property(sysname: &str, property: &str) -> Option<String> {
 /// and finding it empty, both when written before and after device creation.
 /// Setting the property directly takes effect immediately, and KWin persists it
 /// itself.
-async fn map_devices_to_output(pen_only: bool, ident: &DeviceIdentity, card: Option<u32>) {
+async fn map_devices_to_output(pen_only: bool, ident: &DeviceIdentity, card: Option<u32>) -> Option<String> {
     let Some(output) = target_output(pen_only, card, std::time::Duration::from_secs(10)).await
     else {
         if pen_only {
@@ -715,7 +725,7 @@ async fn map_devices_to_output(pen_only: bool, ident: &DeviceIdentity, card: Opt
         } else {
             warn!("No EVDI output found — touch and pen will address the whole desktop");
         }
-        return;
+        return None;
     };
 
     // KWin registers a device slightly after uinput creates it, so retry
@@ -734,7 +744,7 @@ async fn map_devices_to_output(pen_only: bool, ident: &DeviceIdentity, card: Opt
         .await
         else {
             warn!("KWin did not answer — input devices stay unmapped");
-            return;
+            return None;
         };
 
         let mut mapped = 0;
@@ -778,11 +788,68 @@ async fn map_devices_to_output(pen_only: bool, ident: &DeviceIdentity, card: Opt
         }
 
         if mapped >= ident.device_count {
-            return;
+            return Some(output);
         }
     }
 
     warn!("Input devices did not appear in KWin within 5s — mapping skipped");
+    Some(output)
+}
+
+/// Map, then tell the pointer device where that output sits on the desktop.
+async fn map_and_note_area(
+    pen_only: bool,
+    ident: &DeviceIdentity,
+    card: Option<u32>,
+    devices: &Arc<std::sync::Mutex<InjectDevices>>,
+) {
+    let output = map_devices_to_output(pen_only, ident, card).await;
+    let area = match output.as_deref() {
+        Some(o) => output_area_on_desktop(o).await,
+        None => None,
+    };
+    if let Ok(mut guard) = devices.lock() {
+        guard.pointer_area = area;
+    }
+    if let Some((x, y, w, h)) = area {
+        info!(
+            "Pointer area on the desktop: {:.0}%,{:.0}% + {:.0}%x{:.0}%",
+            x * 100.0, y * 100.0, w * 100.0, h * 100.0
+        );
+    }
+}
+
+/// Where `output` sits on the desktop, as fractions of the whole desktop:
+/// (x, y, width, height). `None` when the layout cannot be read.
+///
+/// Used only for the plain pointer device — see `InjectDevices::pointer_area`.
+async fn output_area_on_desktop(output: &str) -> Option<(f64, f64, f64, f64)> {
+    let outputs = kscreen_outputs().await?;
+    let logical = |o: &serde_json::Value| -> Option<(f64, f64, f64, f64)> {
+        let scale = o.get("scale").and_then(|v| v.as_f64()).unwrap_or(1.0).max(0.01);
+        let id = o.get("currentModeId")?.as_str()?;
+        let mode = o.get("modes")?.as_array()?.iter().find(|m| m.get("id").and_then(|v| v.as_str()) == Some(id))?;
+        let w = mode.pointer("/size/width")?.as_f64()? / scale;
+        let h = mode.pointer("/size/height")?.as_f64()? / scale;
+        let x = o.pointer("/pos/x")?.as_f64()?;
+        let y = o.pointer("/pos/y")?.as_f64()?;
+        Some((x, y, w, h))
+    };
+    let mut mine = None;
+    let (mut max_x, mut max_y) = (0.0f64, 0.0f64);
+    for o in &outputs {
+        if !o.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false) {
+            continue;
+        }
+        let Some((x, y, w, h)) = logical(o) else { continue };
+        max_x = max_x.max(x + w);
+        max_y = max_y.max(y + h);
+        if o.get("name").and_then(|v| v.as_str()) == Some(output) {
+            mine = Some((x, y, w, h));
+        }
+    }
+    let (x, y, w, h) = mine?;
+    (max_x > 0.0 && max_y > 0.0).then(|| (x / max_x, y / max_y, w / max_x, h / max_y))
 }
 
 /// The outputs KWin currently knows, as reported by `kscreen-doctor -j`.
@@ -964,6 +1031,7 @@ impl InputServer {
                 active_slots: 0,
                 pen_proximity: false,
                 pen_button: false,
+                pointer_area: None,
             }
         })
         .await
@@ -975,6 +1043,7 @@ impl InputServer {
             active_slots: 0,
             pen_proximity: false,
             pen_button: false,
+            pointer_area: None,
         });
         let uinput = Arc::new(std::sync::Mutex::new(devices));
 
@@ -993,7 +1062,7 @@ impl InputServer {
             // like every later one, so it runs in the background rather than
             // holding up the accept loop below.
             tokio::spawn(async move {
-                map_devices_to_output(initial, &ident_map, card0).await;
+                map_and_note_area(initial, &ident_map, card0, &devices).await;
                 loop {
                     tokio::select! {
                         r = mode_rx.changed() => { if r.is_err() { break; } }
@@ -1013,7 +1082,7 @@ impl InputServer {
                         if pen_only { "pen-only" } else { "second screen" },
                         card.map(|c| format!(" (card{})", c)).unwrap_or_default()
                     );
-                    map_devices_to_output(pen_only, &ident_map, card).await;
+                    map_and_note_area(pen_only, &ident_map, card, &devices).await;
                 }
             });
         }
@@ -1303,9 +1372,20 @@ fn handle_event(
                     // stay where the pen last was.
                     if action == 4 {
                         let (px, py) = guard.last_pen_pos;
+                        let (px, py) = match guard.pointer_area {
+                            Some((ox, oy, ow, oh)) => {
+                                let u = px as f64 / COORD_MAX as f64;
+                                let v = py as f64 / COORD_MAX as f64;
+                                (
+                                    ((ox + u * ow) * COORD_MAX as f64) as i32,
+                                    ((oy + v * oh) * COORD_MAX as f64) as i32,
+                                )
+                            }
+                            None => (px, py),
+                        };
                         if let Some(ref mut dev) = guard.pointer {
-                            let _ = dev.emit(EV_ABS, ABS_X, px);
-                            let _ = dev.emit(EV_ABS, ABS_Y, py);
+                            let _ = dev.emit(EV_ABS, ABS_X, px.clamp(0, COORD_MAX));
+                            let _ = dev.emit(EV_ABS, ABS_Y, py.clamp(0, COORD_MAX));
                             let _ = dev.syn();
                         }
                     }

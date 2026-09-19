@@ -156,7 +156,10 @@ class TouchCapture {
             when (event.actionMasked) {
                 MotionEvent.ACTION_HOVER_ENTER,
                 MotionEvent.ACTION_HOVER_MOVE -> {
-                    if (isPenLike(event, 0)) sendPenEvent(event, 0, 3, vw, vh)
+                    if (isPenLike(event, 0)) {
+                        notePenActivity(vw, vh)
+                        sendPenEvent(event, 0, 3, vw, vh)
+                    }
                 }
                 MotionEvent.ACTION_HOVER_EXIT -> {
                     if (isPenLike(event, 0)) sendPenProximityExit()
@@ -242,8 +245,10 @@ class TouchCapture {
                     return true
                 }
                 if (isPenLike(event, actionIndex)) {
+                    notePenActivity(vw, vh)
                     sendPenEvent(event, actionIndex, 0, vw, vh)
                 } else {
+                    if (penIsActive()) return true
                     val slot = slotOf(event, actionIndex)
                     downSlots.add(slot)
                     sendTouch(event.getX(actionIndex) / vw,
@@ -266,6 +271,7 @@ class TouchCapture {
                         continue
                     }
                     if (isPenLike(event, i)) {
+                        notePenActivity(vw, vh)
                         // Android batches several samples between frames.
                         // Forward the historical points too, otherwise fast
                         // pen strokes look jagged in GIMP.
@@ -282,6 +288,7 @@ class TouchCapture {
                         }
                         sendPenEvent(event, i, 2, vw, vh)
                     } else {
+                        if (penIsActive()) continue
                         sendTouch(event.getX(i) / vw,
                             event.getY(i) / vh,
                             event.getPressure(i).toDouble(),
@@ -302,6 +309,7 @@ class TouchCapture {
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_POINTER_UP -> {
                 if (isPenLike(event, actionIndex)) {
+                    notePenActivity(vw, vh)
                     sendPenEvent(event, actionIndex, 1, vw, vh)
                 } else {
                     // Not filtered on palm: whatever the contact is called
@@ -551,6 +559,30 @@ class TouchCapture {
     @android.annotation.SuppressLint("WrongConstant")
     /** Slots whose DOWN went to the host and whose UP therefore must too. */
     private val downSlots = HashSet<Int>()
+
+    /**
+     * When the pen was last seen, hovering or drawing.
+     *
+     * Filtering on TOOL_TYPE_PALM alone is not enough: a hand resting on the
+     * glass while drawing arrives as an ordinary finger on this tablet, and
+     * the desktop happily scrolled and clicked with it. While the pen is in
+     * play the fingers are the hand holding it, so they are dropped — which
+     * is what every drawing tablet does.
+     */
+    @Volatile private var lastPenNanos = 0L
+    private val PEN_OWNS_SCREEN_NS = 500_000_000L
+
+    private fun penIsActive(): Boolean =
+        lastPenNanos != 0L && System.nanoTime() - lastPenNanos < PEN_OWNS_SCREEN_NS
+
+    /** The pen took over: anything a finger left pressed has to be lifted. */
+    private fun notePenActivity(vw: Float, vh: Float) {
+        lastPenNanos = System.nanoTime()
+        if (downSlots.isNotEmpty()) {
+            for (slot in downSlots.toList()) sendTouch(0f, 0f, 0.0, 1, slot)
+            downSlots.clear()
+        }
+    }
 
     // Lint only knows the public tool types; PALM is hidden but real.
     @Suppress("WrongConstant")

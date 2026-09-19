@@ -3,6 +3,21 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
+## Unreleased
+
+- App: palm rejection really works now. The tablet does not report a resting
+  hand as `TOOL_TYPE_PALM` at all — it arrives as an ordinary finger, which is
+  why the desktop scrolled and opened windows by itself while drawing. Fingers
+  are now ignored while the pen is in play (half a second after its last
+  movement), and anything a finger left pressed is lifted when the pen takes
+  over, which is how graphics tablets have always behaved.
+- The mouse cursor parked where the pen was lifted lands in the right place on
+  multi-monitor desktops. The pen is a tablet tool, which KWin keeps inside the
+  output it is assigned to; a plain absolute pointer is not, and KWin spreads it
+  across the whole desktop whatever the assignment says, so the cursor appeared
+  further left and lower the larger the rest of the desktop was. The daemon now
+  converts the position itself ([#18](https://github.com/majmichu1/UScreen/issues/18)).
+
 ## 1.2.6 — 2026-09-19
 
 - New setting `pointer_handoff` (GUI: *Leave the mouse cursor where the pen
