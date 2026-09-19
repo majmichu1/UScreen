@@ -727,6 +727,9 @@ struct ExtraSessionTemplate {
 /// One extra tablet's running pipeline.
 struct ExtraSession {
     instance: u32,
+    /// This tablet's own settings, so its remembered panel can be applied to
+    /// it and whatever it reports can be written back under its serial.
+    settings_tx: watch::Sender<capture::EncoderSettings>,
     tablet_tx: watch::Sender<bool>,
     relaunch: std::sync::Arc<tokio::sync::Notify>,
     stop_tx: watch::Sender<bool>,
@@ -751,19 +754,26 @@ impl ExtraSession {
 /// Bring up capture, stream and input for tablet number `instance`.
 /// Ports are the base ports plus 2 per instance; the tablet side keeps
 /// using 8890/8891, since `adb reverse` maps them per device.
-fn spawn_extra_session(t: &ExtraSessionTemplate, instance: u32) -> ExtraSession {
+fn spawn_extra_session(t: &ExtraSessionTemplate, instance: u32) -> Option<ExtraSession> {
     let cards = vdisplay::evdi_cards();
     let mut cfg = t.cap_template.clone();
     cfg.instance = instance;
+    // Each tablet owns one EVDI card, by slot. Starting a session without one
+    // used to leave its helper to find a free card by itself, which with
+    // several starting at once means two helpers on the same card and two
+    // streams of the same screen. Better to say what is missing and stop.
     cfg.card = cards.get(instance as usize).copied();
     if cfg.card.is_none() {
         warn!(
-            "Tablet {} needs an EVDI device of its own but only {} exist — set \
-             initial_device_count={} in /etc/modprobe.d/uscreen-evdi.conf and reload evdi",
+            "Tablet {} has no EVDI device of its own: {} exist, {} are wanted. \
+             Put initial_device_count={} in /etc/modprobe.d/uscreen-evdi.conf, \
+             then `sudo modprobe -r evdi && sudo modprobe evdi` or reboot.",
             instance + 1,
             cards.len(),
+            t.max_tablets,
             t.max_tablets
         );
+        return None;
     }
     let video_port = t.video_port + 2 * instance as u16;
     let input_port = t.input_port + 2 * instance as u16;
@@ -779,6 +789,7 @@ fn spawn_extra_session(t: &ExtraSessionTemplate, instance: u32) -> ExtraSession 
         height_mm: cfg.height_mm,
         stream_scale: cfg.stream_scale,
     });
+    let settings_tx_keep = settings_tx.clone();
     let mut cap = capture::CaptureManager::new(cfg.clone());
     let card_rx = cap.card_rx();
     let codec_config = cap.codec_config_arc();
@@ -861,7 +872,16 @@ fn spawn_extra_session(t: &ExtraSessionTemplate, instance: u32) -> ExtraSession 
         input_port,
         cfg.card.map(|c| format!(", EVDI card{}", c)).unwrap_or_default()
     );
-    ExtraSession { instance, tablet_tx, relaunch, stop_tx, tasks, video_port, input_port }
+    Some(ExtraSession {
+        instance,
+        tablet_tx,
+        relaunch,
+        stop_tx,
+        tasks,
+        video_port,
+        input_port,
+        settings_tx: settings_tx_keep,
+    })
 }
 
 /// Keeps watching for tablets. The first serial seen gets the pipeline wired
@@ -999,7 +1019,36 @@ async fn adb_monitor(
                     continue;
                 };
                 info!("Tablet {} connected over {} ({})", instance + 1, transport_of(&serial).label(), serial);
-                let sess = spawn_extra_session(&extra, instance);
+                let Some(sess) = spawn_extra_session(&extra, instance) else {
+                    continue;
+                };
+                apply_tablet_profile(&serial, &sess.settings_tx).await;
+                // Remember what this one reports, under its own serial. The
+                // main saver only watches the first tablet's settings.
+                {
+                    let mut rx = sess.settings_tx.subscribe();
+                    let serial_for_save = serial.clone();
+                    tokio::spawn(async move {
+                        while rx.changed().await.is_ok() {
+                            let s = rx.borrow().clone();
+                            if s.width == 0 || s.height == 0 {
+                                continue;
+                            }
+                            let mut cfg = config::FileConfig::load();
+                            let p = cfg.tablets.entry(serial_for_save.clone()).or_default();
+                            let before = p.clone();
+                            p.width = s.width;
+                            p.height = s.height;
+                            if s.width_mm > 0 && s.height_mm > 0 {
+                                p.width_mm = s.width_mm;
+                                p.height_mm = s.height_mm;
+                            }
+                            if *p != before {
+                                let _ = cfg.save();
+                            }
+                        }
+                    });
+                }
                 let is_fake = std::env::var("USCREEN_FAKE_TABLET")
                     .map(|f| f.split(',').any(|x| x.trim() == serial))
                     .unwrap_or(false);

@@ -5,6 +5,12 @@ Full notes for each version are on the
 
 ## Unreleased
 
+- Several tablets: a slot with no EVDI device of its own is now refused with a
+  message saying what to set, instead of starting a session whose helper hunts
+  for any free card — with several starting at once that could put two helpers
+  on one card. Extra tablets also get their remembered panel applied and
+  written back under their own serial, which until now only the first one did
+  ([#5](https://github.com/majmichu1/UScreen/issues/5)).
 - Each tablet is remembered by its serial. The panel it reported is written to
   a `[tablets.<serial>]` block in the config and used the next time that tablet
   is plugged in, so the display is built for it straight away instead of coming
