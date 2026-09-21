@@ -5,6 +5,24 @@ Full notes for each version are on the
 
 ## Unreleased
 
+- Hyprland: the daemon switches the virtual output on itself. Hyprland listed
+  it with the tablet's mode and left it at 0x0, so nothing was rendered and
+  the tablet stayed black; the automation only knew `kscreen-doctor`. It now
+  uses `hyprctl` — only when Hyprland left the output off, so a monitor rule
+  of your own still wins — at whole-number scale, placed on the configured
+  side, and pins the pen and touch devices to it
+  ([#19](https://github.com/majmichu1/UScreen/issues/19)). Not yet confirmed
+  on real hardware.
+- Several tablets: starting one tablet's capture killed every other tablet's
+  capture helper — it cleared stray helpers by process name, and all of them
+  have the same name. It now only clears a stray writing its own FIFO. The
+  doctor stopped flagging one helper per tablet as a fault
+  ([#5](https://github.com/majmichu1/UScreen/issues/5)).
+- The encoder check at start tries the configured encoder twice, three
+  seconds apart, before replacing it — at login a hybrid laptop's discrete GPU
+  can still be waking up, and the replacement is saved to the config. When it
+  does replace it, the log and `uscreen doctor` now say what ffmpeg reported
+  instead of only that it failed.
 - Several tablets: a slot with no EVDI device of its own is now refused with a
   message saying what to set, instead of starting a session whose helper hunts
   for any free card — with several starting at once that could put two helpers

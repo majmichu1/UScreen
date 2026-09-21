@@ -146,7 +146,11 @@ async fn check_tools(r: &mut Report, cfg: &FileConfig) {
             r.line(Level::Fail, tool, "not installed");
             r.hint(&format!("install {} with your package manager", tool));
         } else {
-            r.line(Level::Warn, tool, "not installed (KDE only)");
+            if crate::hyprland::active() {
+                r.line(Level::Ok, tool, "not needed on Hyprland (hyprctl is used)");
+            } else {
+                r.line(Level::Warn, tool, "not installed (KDE only)");
+            }
         }
     }
 
@@ -154,18 +158,13 @@ async fn check_tools(r: &mut Report, cfg: &FileConfig) {
     // built with, and a distribution build is built with everything. An AMD
     // laptop had h264_nvenc "available" by that measure (#15).
     if output_of("ffmpeg", &["-version"]).await.is_some() {
-        if crate::encoders::works(&cfg.encoder).await {
-            r.line(
-                Level::Ok,
-                "configured encoder",
-                &format!("{} encodes a test frame", cfg.encoder),
-            );
-        } else {
+        if let Err(why) = crate::encoders::probe(&cfg.encoder).await {
             r.line(
                 Level::Fail,
                 "configured encoder",
                 &format!("{} cannot encode on this machine", cfg.encoder),
             );
+            r.hint(&format!("ffmpeg: {}", why));
             let mut alternatives = Vec::new();
             for e in crate::encoders::CANDIDATES {
                 if e != cfg.encoder && crate::encoders::works(e).await {
@@ -180,6 +179,12 @@ async fn check_tools(r: &mut Report, cfg: &FileConfig) {
                     alternatives.join(", ")
                 ));
             }
+        } else {
+            r.line(
+                Level::Ok,
+                "configured encoder",
+                &format!("{} encodes a test frame", cfg.encoder),
+            );
         }
     }
 }
@@ -226,11 +231,30 @@ async fn check_processes(r: &mut Report) {
         r.hint("these fight over the same FIFO and ports — kill them: pkill -x uscreen");
     }
 
-    if helpers.len() > 1 {
+    // Several helpers are fine with several tablets — each writes its own
+    // FIFO. Two on the same FIFO are the fault.
+    let mut per_fifo: std::collections::HashMap<String, Vec<u32>> = Default::default();
+    for pid in &helpers {
+        let args: Vec<String> = std::fs::read(format!("/proc/{}/cmdline", pid))
+            .map(|b| {
+                b.split(|c| *c == 0)
+                    .map(|s| String::from_utf8_lossy(s).into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let fifo = args
+            .iter()
+            .position(|a| a == "--capture-fifo")
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+            .unwrap_or_default();
+        per_fifo.entry(fifo).or_default().push(*pid);
+    }
+    if let Some((fifo, pids)) = per_fifo.iter().find(|(_, p)| p.len() > 1) {
         r.line(
             Level::Fail,
             "evdi_helper processes",
-            &format!("{} running: {:?}", helpers.len(), helpers),
+            &format!("{} writing {}: {:?}", pids.len(), fifo, pids),
         );
         r.hint("several writers interleave on the FIFO — torn frames: pkill -x evdi_helper");
     } else if helpers.len() == 1 && tracked.is_none() {
@@ -438,6 +462,25 @@ async fn check_virtual_display(r: &mut Report, cfg: &FileConfig) {
     }
 
     let names: Vec<&str> = connectors.iter().map(|c| c.name.as_str()).collect();
+    if crate::hyprland::active() {
+        let Some(monitors) = crate::hyprland::monitors().await else {
+            r.line(Level::Warn, "Hyprland", "hyprctl did not answer");
+            return;
+        };
+        for m in monitors.iter().filter(|m| names.contains(&m.name.as_str())) {
+            if m.is_on() {
+                r.line(
+                    Level::Ok,
+                    "Hyprland output",
+                    &format!("{} at {}x{}, scale {}", m.name, m.width, m.height, m.scale),
+                );
+            } else {
+                r.line(Level::Warn, "Hyprland output", &format!("{} is off (0x0)", m.name));
+                r.hint("the daemon switches it on while a tablet is a screen; nothing is rendered while it is off");
+            }
+        }
+        return;
+    }
     let Some(json) = output_of("kscreen-doctor", &["-j"]).await else {
         return;
     };
@@ -492,6 +535,11 @@ async fn check_virtual_display(r: &mut Report, cfg: &FileConfig) {
 /// Reported because it is a global desktop setting, not something the daemon
 /// should quietly decide on the user's behalf.
 async fn check_osk(r: &mut Report) {
+    // Hyprland has no KWin to ask; hyprctl does the mapping there.
+    if crate::hyprland::active() {
+        r.line(Level::Ok, "Hyprland", "hyprctl maps touch and pen onto the tablet's output");
+        return;
+    }
     // Whether we can reach KWin at all decides whether touch and pen land on
     // the tablet's screen, so it is reported first and in its own right.
     match crate::kwin::backend().await {

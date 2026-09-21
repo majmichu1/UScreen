@@ -5,6 +5,7 @@ mod edid;
 #[cfg(feature = "inproc-encoder")]
 mod encoder;
 mod encoders;
+mod hyprland;
 mod kwin;
 mod input;
 mod latency;

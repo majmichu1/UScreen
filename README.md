@@ -167,7 +167,8 @@ display settings. Graphics-tablet mode is a separate, non-display mode.
 proper tablet device.
 
 **Does it work on Bazzite / KDE Wayland?** That is the reference setup.
-GNOME and X11 get the display and the stream; input mapping is manual there.
+Hyprland is handled through `hyprctl` from 1.2.7. GNOME and X11 get the
+display and the stream; input mapping is manual there.
 
 **Does it need a dummy HDMI plug?** No.
 

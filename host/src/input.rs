@@ -718,6 +718,9 @@ async fn kwin_device_property(sysname: &str, property: &str) -> Option<String> {
 /// Setting the property directly takes effect immediately, and KWin persists it
 /// itself.
 async fn map_devices_to_output(pen_only: bool, ident: &DeviceIdentity, card: Option<u32>) -> Option<String> {
+    if crate::hyprland::active() {
+        return map_devices_on_hyprland(pen_only, ident, card).await;
+    }
     let Some(output) = target_output(pen_only, card, std::time::Duration::from_secs(10)).await
     else {
         if pen_only {
@@ -796,6 +799,42 @@ async fn map_devices_to_output(pen_only: bool, ident: &DeviceIdentity, card: Opt
     Some(output)
 }
 
+/// The Hyprland counterpart of the KWin mapping above. Only touch and pen are
+/// pinned: the pointer device is handled by `pointer_area` either way.
+async fn map_devices_on_hyprland(
+    pen_only: bool,
+    ident: &DeviceIdentity,
+    card: Option<u32>,
+) -> Option<String> {
+    let connectors = crate::vdisplay::evdi_connectors();
+    let output = if pen_only {
+        let all: Vec<String> = connectors.into_iter().map(|c| c.name).collect();
+        crate::hyprland::primary_output(&all).await
+    } else {
+        let mine: Vec<String> = connectors
+            .into_iter()
+            .filter(|c| card.is_none_or(|want| c.card == want))
+            .map(|c| c.name)
+            .collect();
+        crate::hyprland::wait_on(&mine, std::time::Duration::from_secs(10)).await
+    };
+    let Some(output) = output else {
+        warn!("Hyprland has no output to map onto — touch and pen will address the whole desktop");
+        return None;
+    };
+    let names = [ident.touch.as_str(), ident.pen.as_str()];
+    for attempt in 0..20 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        if crate::hyprland::map_devices(&names, &output).await >= names.len() {
+            return Some(output);
+        }
+    }
+    warn!("Hyprland did not list both input devices within 5s — mapping incomplete");
+    Some(output)
+}
+
 /// Map, then tell the pointer device where that output sits on the desktop.
 async fn map_and_note_area(
     pen_only: bool,
@@ -805,6 +844,7 @@ async fn map_and_note_area(
 ) {
     let output = map_devices_to_output(pen_only, ident, card).await;
     let area = match output.as_deref() {
+        Some(o) if crate::hyprland::active() => crate::hyprland::output_area(o).await,
         Some(o) => output_area_on_desktop(o).await,
         None => None,
     };

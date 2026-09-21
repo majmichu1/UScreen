@@ -360,6 +360,10 @@ impl CaptureManager {
             warn!("No EVDI connector found in sysfs — cannot enable the virtual display");
             return;
         }
+        if crate::hyprland::active() {
+            crate::hyprland::enable_output(&evdi_names, position).await;
+            return;
+        }
 
         // Retry: KWin may not have registered the new EVDI device yet.
         // Use -j (JSON) rather than the plain "-o" text listing: newer
@@ -537,6 +541,10 @@ impl CaptureManager {
         if evdi_names.is_empty() {
             return;
         }
+        if crate::hyprland::active() {
+            crate::hyprland::disable_output(&evdi_names).await;
+            return;
+        }
         let Ok(o) = tokio::process::Command::new("kscreen-doctor")
             .arg("-j")
             .output()
@@ -577,10 +585,13 @@ impl CaptureManager {
         // writing full frames into the shared FIFO. Several such orphans
         // interleave their output, which the encoder reads as a single
         // stream — producing torn, banded frames mixing several captures.
-        // -x matches the process name exactly so it never hits this daemon
-        // (whose own command line contains the helper path via --helper).
+        // Only a helper writing this session's FIFO is ours to kill: with
+        // several tablets each has its own helper, and a plain
+        // `pkill -x evdi_helper` here took down every other tablet's screen
+        // whenever one of them (re)started. The daemon's own command line
+        // never contains the FIFO path, so this cannot match the daemon.
         let killed_helper = Command::new("pkill")
-            .args(["-x", "evdi_helper"])
+            .args(["-f", &format!("evdi_helper .*--capture-fifo {}( |$)", fifo)])
             .status()
             .await
             .map(|s| s.success())

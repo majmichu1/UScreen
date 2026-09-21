@@ -24,6 +24,12 @@ Requirements that follow from the design:
 - **Wayland with KDE Plasma** gets the full experience: the daemon places the
   virtual output and maps the pen and touch onto it through KWin's D-Bus
   interfaces, and suppresses the on-screen keyboard.
+- **Hyprland** (from 1.2.7): the daemon switches the virtual output on with
+  `hyprctl` when Hyprland leaves it off, and pins the pen and touch to it. A
+  monitor rule of your own for the output takes precedence. Written against
+  Hyprland's documented `hyprctl` interface and not yet confirmed on real
+  hardware — reports welcome in
+  [#19](https://github.com/majmichu1/UScreen/issues/19).
 - **Other desktops** (GNOME, Sway, X11): the virtual display and the stream
   work wherever EVDI does, but output placement and input mapping are not
   automated — assign the "UScreen Pen"/"UScreen Touch" devices to the UScreen
