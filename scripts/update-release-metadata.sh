@@ -8,6 +8,8 @@
 #   docs/llms.txt     "Current version: X (date)" and "Last verified: date"
 #   docs/sitemap.xml  every <lastmod>
 #   CITATION.cff      version and date-released
+#   packaging/        pkgver in the PKGBUILD, Version in the deb control file
+#                     and the rpm spec
 #
 # Every pattern must match at least once, so a rewrite of one of those files
 # that drops a marker makes this script fail instead of silently leaving an
@@ -55,6 +57,17 @@ RULES = {
     ],
     "docs/sitemap.xml": [
         (rf"<lastmod>{DAY}</lastmod>", f"<lastmod>{date}</lastmod>"),
+    ],
+    # Patched again at build time; kept current here so a PKGBUILD taken
+    # straight from the repository builds the release too (#21).
+    "packaging/arch/PKGBUILD": [
+        (rf"^pkgver={NUM}$", f"pkgver={version}"),
+    ],
+    "packaging/deb/control": [
+        (rf"^Version: {NUM}$", f"Version: {version}"),
+    ],
+    "packaging/rpm/uscreen.spec": [
+        (rf"^Version:(\s+){NUM}$", rf"Version:\g<1>{version}"),
     ],
     "CITATION.cff": [
         (rf'^version: "{NUM}"', f'version: "{version}"'),

@@ -242,6 +242,7 @@ class VideoReceiver {
     }
 
     private fun setupCodec(surface: Surface): Boolean {
+        var created: MediaCodec? = null
         try {
             val format = MediaFormat.createVideoFormat(mimeType, formatWidth, formatHeight)
             // Follow the stream's real frame rate rather than a hardcoded
@@ -287,6 +288,7 @@ class VideoReceiver {
                 Log.w(TAG, "Software decoder unavailable, using the device default", e)
                 MediaCodec.createDecoderByType(mimeType)
             }
+            created = codec
             Log.i(TAG, "Decoder ${codec.name} for $mimeType, tier $decoderTier")
             codec.configure(format, surface, null, 0)
             codec.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT)
@@ -312,6 +314,23 @@ class VideoReceiver {
             return true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to setup codec", e)
+            // A decoder that was created but refused its configuration still
+            // holds one of the chip's few hardware instances. Retrying every
+            // half second without releasing it used the rest up, so a single
+            // refusal became permanent.
+            try { created?.release() } catch (_: Exception) {}
+            frameCallbackThread?.quitSafely()
+            frameCallbackThread = null
+            // Step down the same ladder a stalling decoder does, instead of
+            // asking for the refused configuration again forever — the video
+            // socket is only opened once a decoder exists, so that loop kept
+            // the app on "Waiting for the host" with nothing in the host log
+            // (#10: a Tab S10 FE+ at 2880x1800, 90 fps, where the low-latency
+            // hints ask for an operating rate of 180).
+            if (decoderTier < 2) {
+                decoderTier++
+                Log.w(TAG, "Decoder refused its configuration — retrying at tier $decoderTier")
+            }
             return false
         }
     }

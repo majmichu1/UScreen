@@ -1,6 +1,6 @@
 # Maintainer: majmichu1
 pkgname=uscreen
-pkgver=1.1.0
+pkgver=1.2.6
 pkgrel=1
 pkgdesc="Use an Android tablet as a USB second display and graphics tablet (KDE Wayland)"
 arch=('x86_64')

@@ -5,6 +5,21 @@ Full notes for each version are on the
 
 ## Unreleased
 
+- App: a decoder that refuses its configuration steps down the same ladder as
+  one that stalls (without the low-latency hints, then Android's software
+  decoder) instead of being asked for the same thing every half second. The
+  video connection only opens once a decoder exists, so that loop left the
+  app on "Waiting for the host" while the host showed everything working —
+  a Tab S10 FE+ at 90 fps, where the hints ask the decoder for an operating
+  rate of 180 ([#10](https://github.com/majmichu1/UScreen/issues/10)). Each
+  refused decoder is also released now; they used to pile up until the chip
+  had none left.
+- Arch: the PKGBUILD shipped with every release since 1.1.0 still said
+  `pkgver=1.1.0`, so `makepkg` built the 1.1.0 source and failed at
+  `package()`. The version is now set when the release is built, like the
+  deb and rpm versions, and the release check refuses a stale one. The 1.2.6
+  release file has been replaced with a corrected one
+  ([#21](https://github.com/majmichu1/UScreen/issues/21)).
 - Hyprland: the daemon switches the virtual output on itself. Hyprland listed
   it with the tablet's mode and left it at 0x0, so nothing was rendered and
   the tablet stayed black; the automation only knew `kscreen-doctor`. It now

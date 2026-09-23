@@ -44,6 +44,14 @@ distrobox enter "${USCREEN_BUILD_CONTAINER:-uscreen-build}" -- bash -lc '
 '
 # Arch users get the PKGBUILD as a release file too; makepkg needs the
 # install script next to it, hence a small archive rather than a bare file.
-tar -C packaging/arch -czf "dist/uscreen-$VERSION-PKGBUILD.tar.gz" PKGBUILD uscreen.install
+# pkgver is set here like the deb and rpm versions above: copied as-is, the
+# PKGBUILD in 1.1.0 through 1.2.6 still said 1.1.0 and built the old source
+# (#21).
+A="$(mktemp -d)"
+sed "s/^pkgver=.*/pkgver=$VERSION/" packaging/arch/PKGBUILD > "$A/PKGBUILD"
+cp packaging/arch/uscreen.install "$A/"
+grep -qx "pkgver=$VERSION" "$A/PKGBUILD" || { echo "!! PKGBUILD has no pkgver line"; exit 1; }
+tar -C "$A" -czf "dist/uscreen-$VERSION-PKGBUILD.tar.gz" PKGBUILD uscreen.install
+rm -rf "$A"
 
 ls -la dist/*.deb dist/*.rpm dist/*PKGBUILD*
