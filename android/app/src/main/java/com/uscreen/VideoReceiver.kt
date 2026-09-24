@@ -314,6 +314,12 @@ class VideoReceiver {
             return true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to setup codec", e)
+            // CodecException's message is often empty; the code and the
+            // vendor's diagnostic string are what say why (#10).
+            if (e is MediaCodec.CodecException) {
+                Log.e(TAG, "Codec error ${e.errorCode} (${e.diagnosticInfo}), " +
+                    "transient=${e.isTransient} recoverable=${e.isRecoverable}")
+            }
             // A decoder that was created but refused its configuration still
             // holds one of the chip's few hardware instances. Retrying every
             // half second without releasing it used the rest up, so a single
