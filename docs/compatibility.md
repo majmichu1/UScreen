@@ -27,7 +27,7 @@ Requirements that follow from the design:
 - **Wayland with KDE Plasma** gets the full experience: the daemon places the
   virtual output and maps the pen and touch onto it through KWin's D-Bus
   interfaces, and suppresses the on-screen keyboard.
-- **Hyprland** (from 1.2.7): the daemon switches the virtual output on with
+- **Hyprland** (since 1.2.7): the daemon switches the virtual output on with
   `hyprctl` when Hyprland leaves it off, and pins the pen and touch to it. A
   monitor rule of your own for the output takes precedence. Written against
   Hyprland's documented `hyprctl` interface and not yet confirmed on real

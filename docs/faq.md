@@ -40,7 +40,7 @@ streamed and the pen simply drives your existing screen, like a Wacom Intuos.
 
 **Does UScreen work on Bazzite and KDE Wayland?**
 That is the reference setup. KDE on Wayland gets automatic output placement,
-input mapping and on-screen-keyboard suppression. From 1.2.7 Hyprland gets
+input mapping and on-screen-keyboard suppression. Since 1.2.7 Hyprland gets
 the output switched on and the input mapped through `hyprctl`. Other
 desktops get the display and the stream; mapping is manual there.
 

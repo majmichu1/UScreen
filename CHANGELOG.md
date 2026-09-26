@@ -3,7 +3,7 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
-## Unreleased
+## 1.2.7 — 2026-09-26
 
 - App: a decoder that refuses its configuration steps down the same ladder as
   one that stalls (without the low-latency hints, then Android's software
