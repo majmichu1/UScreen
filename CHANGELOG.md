@@ -3,6 +3,22 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
+## Unreleased
+
+- App: the S Pen side button works while the pen hovers. Android reports it
+  as a separate press event only sometimes, and never to the touch listener
+  when the pen is in the air — which is when it is pressed to pan or
+  right-click — so the button did nothing for anyone who pressed it before
+  touching down. The app now reads the button from every pen event
+  ([#23](https://github.com/majmichu1/UScreen/issues/23),
+  [#25](https://github.com/majmichu1/UScreen/issues/25)).
+- App: the settings sheet scrolls. On a short landscape screen, like a Fire 7's
+  600 px, everything below the first few settings was out of reach
+  ([#27](https://github.com/majmichu1/UScreen/issues/27)).
+- `uscreen doctor` no longer reports a FAIL for KWin on desktops that are not
+  Plasma; it says the mapping is manual there
+  ([#26](https://github.com/majmichu1/UScreen/issues/26)).
+
 ## 1.2.7 — 2026-09-26
 
 - App: a decoder that refuses its configuration steps down the same ladder as

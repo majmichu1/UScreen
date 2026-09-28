@@ -540,6 +540,22 @@ async fn check_osk(r: &mut Report) {
         r.line(Level::Ok, "Hyprland", "hyprctl maps touch and pen onto the tablet's output");
         return;
     }
+    // KWin is only there on Plasma. On COSMIC or GNOME its absence is not a
+    // fault, and a FAIL sent people hunting for a qdbus package (#26).
+    let session = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    if !session.is_empty() && !session.to_uppercase().contains("KDE") {
+        r.line(
+            Level::Warn,
+            "desktop",
+            &format!("{} — pen and touch mapping is manual here", session),
+        );
+        r.hint(
+            "UScreen maps the tablet's input onto its screen automatically only on KDE Plasma \
+             and Hyprland. Elsewhere, assign the \"UScreen Pen\" and \"UScreen Touch\" devices \
+             to the UScreen output in your desktop's settings.",
+        );
+        return;
+    }
     // Whether we can reach KWin at all decides whether touch and pen land on
     // the tablet's screen, so it is reported first and in its own right.
     match crate::kwin::backend().await {

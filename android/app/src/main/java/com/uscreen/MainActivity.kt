@@ -15,6 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -745,7 +746,14 @@ private fun SettingsSheet(
         onDismissRequest = onDismiss,
         containerColor = Color(0xFF16161F)
     ) {
-        Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) {
+        // Scrolls: on a landscape phone or a 600 px tablet the sheet is taller
+        // than the screen, and everything below the first few settings was
+        // unreachable (#27).
+        Column(
+            modifier = Modifier
+                .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 8.dp)
+        ) {
             Text(
                 "Settings",
                 fontSize = 20.sp,

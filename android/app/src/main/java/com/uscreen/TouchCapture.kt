@@ -170,6 +170,7 @@ class TouchCapture {
     }
 
     fun connect() {
+        penButtonDown = false
         // Idempotent: a second connect() must not leave the first socket
         // alive with its listener still flipping isConnected. onStart and a
         // token delivered through onNewIntent can both call this.
@@ -219,6 +220,12 @@ class TouchCapture {
             MotionEvent.ACTION_HOVER_EXIT -> {
                 if (!isPenLike(event, 0)) return false
                 sendPenProximityExit()
+                true
+            }
+            MotionEvent.ACTION_BUTTON_PRESS,
+            MotionEvent.ACTION_BUTTON_RELEASE -> {
+                if (!isPenLike(event, 0)) return false
+                syncPenButton(event)
                 true
             }
             else -> false
@@ -300,10 +307,10 @@ class TouchCapture {
             // S-Pen side button. Fired as a discrete event while hovering or
             // drawing; forwarded as the stylus button (right-click in GIMP).
             MotionEvent.ACTION_BUTTON_PRESS -> {
-                if (isPenLike(event, event.actionIndex)) sendPenButton(true)
+                if (isPenLike(event, event.actionIndex)) syncPenButton(event)
             }
             MotionEvent.ACTION_BUTTON_RELEASE -> {
-                if (isPenLike(event, event.actionIndex)) sendPenButton(false)
+                if (isPenLike(event, event.actionIndex)) syncPenButton(event)
             }
 
             MotionEvent.ACTION_UP,
@@ -432,6 +439,27 @@ class TouchCapture {
             getAxis(event, MotionEvent.AXIS_ORIENTATION, index))
         emitPen(x.toDouble(), y.toDouble(), pressure, tiltX, tiltY,
             isEraser(event, index), action)
+        syncPenButton(event)
+    }
+
+    /** The S Pen side button as the host last heard it. */
+    private var penButtonDown = false
+
+    /**
+     * Send the side button whenever its state differs from what the host
+     * knows, read from the event's own button state. Android reports a press
+     * as a separate ACTION_BUTTON_PRESS only some of the time, and never
+     * through the touch listener while the pen hovers — which is when the
+     * button is used to pan or right-click — so waiting for that action left
+     * the button dead for anyone who presses it before touching down
+     * (#23, #25).
+     */
+    private fun syncPenButton(event: MotionEvent) {
+        val down = (event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0
+        if (down != penButtonDown) {
+            penButtonDown = down
+            sendPenButton(down)
+        }
     }
 
     private fun emitPen(x: Double, y: Double, pressure: Double,
@@ -465,6 +493,12 @@ class TouchCapture {
     }
 
     private fun sendPenProximityExit() {
+        // A button still held when the pen leaves would stay pressed on the
+        // host until the next press.
+        if (penButtonDown) {
+            penButtonDown = false
+            sendPenButton(false)
+        }
         val msg = JSONObject().apply {
             put("type", "pen")
             put("x", 0.0)

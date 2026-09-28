@@ -21,6 +21,8 @@ please add yours.
 | Arch Linux | KDE Plasma 6.7.5, Wayland | AMD Radeon 880M, `h264_vaapi` | works; with a Galaxy Tab A7 latency is high (p50 480 ms) | [issue #22](https://github.com/majmichu1/UScreen/issues/22) |
 | Nobara 43 (Fedora) | KDE Plasma 6.6.2, Wayland | NVIDIA RTX 3050 Ti Mobile + AMD Vega, `hevc_nvenc` | works | [issue #23](https://github.com/majmichu1/UScreen/issues/23) |
 | Linux Mint 22.3 | Cinnamon | Intel Lunar Lake | works (input mapping is manual on Cinnamon) | [issue #24](https://github.com/majmichu1/UScreen/issues/24) |
+| Arch Linux (kernel 7.2) | KDE Plasma 6.7.5, Wayland | Intel UHD (i5-10210U), `h264_vaapi` | works on a Fire 7 (9th gen); smooth, some latency | [issue #27](https://github.com/majmichu1/UScreen/issues/27) |
+| Ubuntu 26.04.1 LTS | GNOME, Wayland | Intel UHD 620, `libx264` | works with a Galaxy Tab A9+ (1.2.7, `.deb`) | [issue #28](https://github.com/majmichu1/UScreen/issues/28) |
 
 Requirements that follow from the design:
 
@@ -53,6 +55,8 @@ Requirements that follow from the design:
 | Samsung Galaxy Tab A7 (SM-T505) | 12 | — | works, but decoding is slow: p50 480 ms | [issue #22](https://github.com/majmichu1/UScreen/issues/22) |
 | Samsung Galaxy Tab S10 FE+ | 16 | S Pen (button not working yet) | works over HEVC on Nobara KDE | [issue #23](https://github.com/majmichu1/UScreen/issues/23) |
 | Samsung Galaxy S26 Ultra (phone) | 16 | — | works on Mint Cinnamon | [issue #24](https://github.com/majmichu1/UScreen/issues/24) |
+| Amazon Fire 7 (9th gen) | Fire OS 7 (Android 9) | — | works over micro USB at 60 fps / 20 Mbps; MediaTek MT8163 decoder | [issue #27](https://github.com/majmichu1/UScreen/issues/27) |
+| Samsung Galaxy Tab A9+ | 16 | — | works on Ubuntu 26.04 GNOME | [issue #28](https://github.com/majmichu1/UScreen/issues/28) |
 
 Any Android 8.1+ device with a hardware H.264 decoder should work — the app
 reports its own panel size and the virtual display is generated to match.
