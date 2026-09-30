@@ -12,6 +12,12 @@ Full notes for each version are on the
   touching down. The app now reads the button from every pen event
   ([#23](https://github.com/majmichu1/UScreen/issues/23),
   [#25](https://github.com/majmichu1/UScreen/issues/25)).
+- App: the S Pen button is also recognised when a Samsung build reports it as
+  a secondary mouse button rather than the stylus button.
+- `uscreen doctor` flags Android's Night Light and Xiaomi's Reading mode, not
+  only Samsung's blue light filter. A scheduled filter looks right in the
+  afternoon and orange after an evening reboot
+  ([#29](https://github.com/majmichu1/UScreen/issues/29)).
 - App: the settings sheet scrolls. On a short landscape screen, like a Fire 7's
   600 px, everything below the first few settings was out of reach
   ([#27](https://github.com/majmichu1/UScreen/issues/27)).

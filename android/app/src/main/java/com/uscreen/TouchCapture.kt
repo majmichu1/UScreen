@@ -455,7 +455,10 @@ class TouchCapture {
      * (#23, #25).
      */
     private fun syncPenButton(event: MotionEvent) {
-        val down = (event.buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY) != 0
+        // Some Samsung builds report the S Pen button as a secondary mouse
+        // button instead of the stylus one.
+        val down = (event.buttonState and
+            (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_SECONDARY)) != 0
         if (down != penButtonDown) {
             penButtonDown = down
             sendPenButton(down)

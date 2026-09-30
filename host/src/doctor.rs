@@ -630,6 +630,32 @@ async fn check_colour(r: &mut Report) {
         _ => {}
     }
 
+    // The same warming from other makers. Stock Android's Night Light is
+    // often on a schedule, which is how a picture can look right in the
+    // afternoon and orange after a reboot in the evening (#29); Xiaomi's
+    // Reading mode does the same.
+    for (namespace, key, name, hint) in [
+        (
+            "secure",
+            "night_display_activated",
+            "Night Light",
+            "tablet: Settings → Display → Night Light → off (or its schedule)",
+        ),
+        (
+            "system",
+            "screen_paper_mode_enabled",
+            "reading mode",
+            "tablet: Settings → Display → Reading mode → off",
+        ),
+    ] {
+        if let Some(v) = output_of("adb", &["shell", "settings", "get", namespace, key]).await {
+            if v.trim() == "1" {
+                r.line(Level::Fail, name, "ON — colours are warmed");
+                r.hint(hint);
+            }
+        }
+    }
+
     // Samsung's "Vivid" screen mode stretches saturation past sRGB. "Natural"
     // is the colour-accurate one.
     if let Some(v) = output_of("adb", &["shell", "settings", "get", "system", "screen_mode_setting"]).await
