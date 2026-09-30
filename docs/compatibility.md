@@ -35,6 +35,10 @@ Requirements that follow from the design:
   Hyprland's documented `hyprctl` interface and not yet confirmed on real
   hardware — reports welcome in
   [#19](https://github.com/majmichu1/UScreen/issues/19).
+- **COSMIC** (from 1.2.8): the daemon switches the virtual output on with
+  `cosmic-randr`. Not yet confirmed on real hardware, see
+  [#26](https://github.com/majmichu1/UScreen/issues/26). Pen and touch
+  mapping is manual there.
 - **Other desktops** (GNOME, Sway, X11): the virtual display and the stream
   work wherever EVDI does, but output placement and input mapping are not
   automated — assign the "UScreen Pen"/"UScreen Touch" devices to the UScreen

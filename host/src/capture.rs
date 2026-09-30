@@ -364,6 +364,10 @@ impl CaptureManager {
             crate::hyprland::enable_output(&evdi_names, position).await;
             return;
         }
+        if crate::cosmic::active() {
+            crate::cosmic::enable_output(&evdi_names).await;
+            return;
+        }
 
         // Retry: KWin may not have registered the new EVDI device yet.
         // Use -j (JSON) rather than the plain "-o" text listing: newer
@@ -543,6 +547,10 @@ impl CaptureManager {
         }
         if crate::hyprland::active() {
             crate::hyprland::disable_output(&evdi_names).await;
+            return;
+        }
+        if crate::cosmic::active() {
+            crate::cosmic::disable_output(&evdi_names).await;
             return;
         }
         let Ok(o) = tokio::process::Command::new("kscreen-doctor")

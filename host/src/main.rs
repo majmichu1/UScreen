@@ -1,5 +1,6 @@
 mod capture;
 mod config;
+mod cosmic;
 mod doctor;
 mod edid;
 #[cfg(feature = "inproc-encoder")]

@@ -12,6 +12,12 @@ Full notes for each version are on the
   touching down. The app now reads the button from every pen event
   ([#23](https://github.com/majmichu1/UScreen/issues/23),
   [#25](https://github.com/majmichu1/UScreen/issues/25)).
+- COSMIC: the daemon switches the virtual output on with `cosmic-randr`.
+  COSMIC leaves a new EVDI output disabled, so nothing was rendered to it, the
+  helper saw almost no frames and the tablet restarted its connection over and
+  over ([#26](https://github.com/majmichu1/UScreen/issues/26)). Pen and touch
+  mapping stays manual there. Not yet confirmed on a real COSMIC session; the
+  log shows every `cosmic-randr` answer.
 - App: the S Pen button is also recognised when a Samsung build reports it as
   a secondary mouse button rather than the stylus button.
 - `uscreen doctor` flags Android's Night Light and Xiaomi's Reading mode, not
