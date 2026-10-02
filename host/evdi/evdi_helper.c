@@ -178,8 +178,43 @@ static void on_dpms(int dpms_mode, void *user_data) {
    16-235 back to 0-255), so the only real exposure is slight banding in
    gradients, which is the lesser problem by a wide margin. */
 
+/* Byte offsets of the red, green and blue samples inside one 32-bit pixel.
+   The framebuffer is not always BGRA: the compositor picks the DRM format and
+   libevdi reports it in the mode event. ARGB8888/XRGB8888 are B,G,R,x in
+   memory (the default); ABGR8888/XBGR8888 are R,G,B,x. Reading the second as
+   the first swaps red and blue — a blue desktop arrives orange on the tablet.
+   Only changed from the mode callback, which runs on the thread that also
+   dispatches conversions, so the workers never see it change under them. */
+static int g_off_r = 2, g_off_g = 1, g_off_b = 0;
+
+#define FOURCC(a, b, c, d) ((unsigned)(a) | ((unsigned)(b) << 8) | \
+                            ((unsigned)(c) << 16) | ((unsigned)(d) << 24))
+
+static void set_pixel_order(unsigned int fmt) {
+    int r = 2, g = 1, b = 0, known = 1;
+    switch (fmt) {
+    case FOURCC('A','R','2','4'): case FOURCC('X','R','2','4'):  /* B,G,R,x */
+        break;
+    case FOURCC('A','B','2','4'): case FOURCC('X','B','2','4'):  /* R,G,B,x */
+        r = 0; g = 1; b = 2; break;
+    case FOURCC('R','A','2','4'): case FOURCC('R','X','2','4'):  /* x,B,G,R */
+        r = 3; g = 2; b = 1; break;
+    case FOURCC('B','A','2','4'): case FOURCC('B','X','2','4'):  /* x,R,G,B */
+        r = 1; g = 2; b = 3; break;
+    default:
+        known = 0;      /* 0 = not reported by an old libevdi: keep BGRA */
+        break;
+    }
+    if (g_off_r != r || g_off_b != b)
+        fprintf(stderr, "[evdi-helper] Pixel format 0x%x: red at byte %d, blue at byte %d\n",
+                fmt, r, b);
+    if (!known && fmt != 0)
+        fprintf(stderr, "[evdi-helper] Unknown pixel format 0x%x — assuming BGRA\n", fmt);
+    g_off_r = r; g_off_g = g; g_off_b = b;
+}
+
 typedef struct {
-    const unsigned char *src;   /* BGRA, stride-padded */
+    const unsigned char *src;   /* 32-bit pixels, stride-padded; see g_off_* */
     unsigned char *ydst;        /* Y plane, w bytes/row */
     unsigned char *uvdst;       /* interleaved CbCr, w bytes per chroma row */
     int w, h, stride;           /* source dimensions */
@@ -200,6 +235,7 @@ static inline int row_is_dirty(const unsigned char *mask, int cy) {
 static inline void convert_strip_scaled(const conv_job_t *j) {
     const int n = j->scale, stride = j->stride, ow = j->ow;
     const int inv = n * n;
+    const int or_ = g_off_r, og = g_off_g, ob = g_off_b;
     for (int cy = j->cy0; cy < j->cy1; cy++) {
         if (!row_is_dirty(j->dirty, cy))
             continue;
@@ -216,9 +252,9 @@ static inline void convert_strip_scaled(const conv_job_t *j) {
                     const unsigned char *row =
                         j->src + (size_t)(oyy * n + dy) * stride + (size_t)(oxx * n) * 4;
                     for (int dx = 0; dx < n; dx++) {
-                        sb += row[dx * 4];
-                        sg += row[dx * 4 + 1];
-                        sr += row[dx * 4 + 2];
+                        sb += row[dx * 4 + ob];
+                        sg += row[dx * 4 + og];
+                        sr += row[dx * 4 + or_];
                     }
                 }
                 int b = sb / inv, g = sg / inv, r = sr / inv;
@@ -240,6 +276,7 @@ static inline void convert_strip_scaled(const conv_job_t *j) {
 
 static inline void convert_strip(const conv_job_t *j) {
     const int w = j->w, stride = j->stride;
+    const int or_ = g_off_r, og = g_off_g, ob = g_off_b;
     for (int cy = j->cy0; cy < j->cy1; cy++) {
         if (!row_is_dirty(j->dirty, cy))
             continue;
@@ -252,16 +289,16 @@ static inline void convert_strip(const conv_job_t *j) {
         for (int x = 0; x < w; x += 2) {
             const unsigned char *p;
             int b, g, r, sb, sg, sr;
-            p = row0 + (size_t)x * 4;       b = p[0]; g = p[1]; r = p[2];
+            p = row0 + (size_t)x * 4;       b = p[ob]; g = p[og]; r = p[or_];
             yo0[x]   = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
             sb = b; sg = g; sr = r;
-            p = row0 + (size_t)(x+1) * 4;   b = p[0]; g = p[1]; r = p[2];
+            p = row0 + (size_t)(x+1) * 4;   b = p[ob]; g = p[og]; r = p[or_];
             yo0[x+1] = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
             sb += b; sg += g; sr += r;
-            p = row1 + (size_t)x * 4;       b = p[0]; g = p[1]; r = p[2];
+            p = row1 + (size_t)x * 4;       b = p[ob]; g = p[og]; r = p[or_];
             yo1[x]   = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
             sb += b; sg += g; sr += r;
-            p = row1 + (size_t)(x+1) * 4;   b = p[0]; g = p[1]; r = p[2];
+            p = row1 + (size_t)(x+1) * 4;   b = p[ob]; g = p[og]; r = p[or_];
             yo1[x+1] = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
             sb += b; sg += g; sr += r;
             int ar = sr >> 2, ag = sg >> 2, ab = sb >> 2;  /* 2x2 chroma average */
@@ -409,6 +446,12 @@ static void on_mode_changed(struct evdi_mode mode, void *user_data) {
             mode.bits_per_pixel, mode.pixel_format);
     printf("MODE_CHANGED %d %d %d\n", mode.width, mode.height, mode.refresh_rate);
     fflush(stdout);
+
+    /* Before the "unchanged" early return below: a compositor can switch
+       format without changing the size. Conversions are not running during a
+       mode event, so the next frame simply uses the new order. */
+    set_pixel_order(mode.pixel_format);
+    mark_all_dirty();
 
     int new_w = mode.width;
     int new_h = mode.height;

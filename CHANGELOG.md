@@ -12,6 +12,15 @@ Full notes for each version are on the
   touching down. The app now reads the button from every pen event
   ([#23](https://github.com/majmichu1/UScreen/issues/23),
   [#25](https://github.com/majmichu1/UScreen/issues/25)).
+- Fix: red and blue swapped on the tablet (a blue desktop arriving orange).
+  The capture helper read every framebuffer as B,G,R,x, but the compositor
+  chooses the pixel format and can hand the virtual screen over as
+  ABGR8888, which is R,G,B,x — seen in a COSMIC log, and a Rocky Linux user
+  whose picture was fine until a reboot
+  ([#29](https://github.com/majmichu1/UScreen/issues/29)). The helper now
+  takes the channel order from the format libevdi reports, for all four
+  32-bit RGB layouts, and logs when it is not the usual one. The Night Light
+  and Reading mode checks in the doctor stay: those filters tint the same way.
 - COSMIC: the daemon switches the virtual output on with `cosmic-randr`.
   COSMIC leaves a new EVDI output disabled, so nothing was rendered to it, the
   helper saw almost no frames and the tablet restarted its connection over and
