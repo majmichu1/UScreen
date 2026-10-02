@@ -39,10 +39,21 @@ Requirements that follow from the design:
   `cosmic-randr`. Not yet confirmed on real hardware, see
   [#26](https://github.com/majmichu1/UScreen/issues/26). Pen and touch
   mapping is manual there.
-- **Other desktops** (GNOME, Sway, X11): the virtual display and the stream
+- **GNOME on Wayland** and **X11 sessions other than Plasma** (Cinnamon, XFCE,
+  MATE, GNOME on Xorg; from 1.2.8): the daemon maps pen and touch itself, with
+  GNOME's per-device settings and with `xinput map-to-output`, and on X11 it
+  switches the output on with `xrandr` (the `xinput` package is needed).
+  Neither is confirmed on real hardware yet, reports welcome in
+  [#4](https://github.com/majmichu1/UScreen/issues/4).
+- **Other desktops** (Sway, COSMIC, other wlroots compositors): the virtual display and the stream
   work wherever EVDI does, but output placement and input mapping are not
   automated — assign the "UScreen Pen"/"UScreen Touch" devices to the UScreen
   output in your desktop's settings. Reports welcome.
+- **Mapping the pen by hand**, where the daemon cannot: KDE, System Settings →
+  Drawing Tablet → "UScreen Pen" → Output, then Touchscreen for "UScreen
+  Touch". GNOME, Settings → Wacom Tablet → Map to Monitor. On X11,
+  `xinput map-to-output "UScreen Pen" DVI-I-1` (and the same for
+  "UScreen Touch"), with the output name from `xrandr`.
 - **NVIDIA** uses NVENC; **AMD/Intel** use VAAPI (`h264_vaapi`); anything can
   fall back to `libx264` on the CPU.
 - The evdi kernel module must be available: in the image (Bazzite, Nobara),

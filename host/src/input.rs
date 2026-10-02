@@ -721,6 +721,12 @@ async fn map_devices_to_output(pen_only: bool, ident: &DeviceIdentity, card: Opt
     if crate::hyprland::active() {
         return map_devices_on_hyprland(pen_only, ident, card).await;
     }
+    if crate::gnome::active() {
+        return map_devices_on_gnome(pen_only, ident, card).await;
+    }
+    if crate::x11::active() {
+        return map_devices_on_x11(pen_only, ident, card).await;
+    }
     let Some(output) = target_output(pen_only, card, std::time::Duration::from_secs(10)).await
     else {
         if pen_only {
@@ -835,6 +841,67 @@ async fn map_devices_on_hyprland(
     Some(output)
 }
 
+/// GNOME on Wayland: per-device settings keyed on the EDID triple; see
+/// `gnome.rs`. The plain pointer has no such setting, so it keeps whatever
+/// GNOME does with an absolute pointer.
+async fn map_devices_on_gnome(
+    pen_only: bool,
+    ident: &DeviceIdentity,
+    card: Option<u32>,
+) -> Option<String> {
+    let mine: Vec<String> = crate::vdisplay::evdi_connectors()
+        .into_iter()
+        .filter(|c| card.is_none_or(|want| c.card == want))
+        .map(|c| c.name)
+        .collect();
+    crate::gnome::map_devices(
+        UINPUT_VENDOR,
+        ident.product_touch,
+        ident.product_pen,
+        &mine,
+        pen_only,
+    )
+    .await
+}
+
+/// Real X11 sessions other than Plasma: `xinput map-to-output`; see `x11.rs`.
+async fn map_devices_on_x11(
+    pen_only: bool,
+    ident: &DeviceIdentity,
+    card: Option<u32>,
+) -> Option<String> {
+    let connectors = crate::vdisplay::evdi_connectors();
+    let output = if pen_only {
+        let all: Vec<String> = connectors.into_iter().map(|c| c.name).collect();
+        crate::x11::primary_output(&all).await
+    } else {
+        let mine: Vec<String> = connectors
+            .into_iter()
+            .filter(|c| card.is_none_or(|want| c.card == want))
+            .map(|c| c.name)
+            .collect();
+        crate::x11::wait_active(&mine, std::time::Duration::from_secs(10)).await
+    };
+    let Some(output) = output else {
+        warn!("X11 has no output to map onto — touch and pen will address the whole desktop");
+        return None;
+    };
+    let mut names = vec![ident.touch.as_str(), ident.pen.as_str()];
+    if ident.device_count > 2 {
+        names.push(ident.pointer.as_str());
+    }
+    for attempt in 0..20 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        if crate::x11::map_devices(&names, &output).await >= names.len() {
+            return Some(output);
+        }
+    }
+    warn!("xinput did not list and accept every input device within 5s — mapping incomplete");
+    Some(output)
+}
+
 /// Map, then tell the pointer device where that output sits on the desktop.
 async fn map_and_note_area(
     pen_only: bool,
@@ -845,6 +912,9 @@ async fn map_and_note_area(
     let output = map_devices_to_output(pen_only, ident, card).await;
     let area = match output.as_deref() {
         Some(o) if crate::hyprland::active() => crate::hyprland::output_area(o).await,
+        // Mapped to the output itself (xinput) or left to the desktop
+        // (GNOME): the pen's own coordinates are already the right ones.
+        Some(_) if crate::gnome::active() || crate::x11::active() => None,
         Some(o) => output_area_on_desktop(o).await,
         None => None,
     };

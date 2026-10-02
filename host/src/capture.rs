@@ -368,6 +368,14 @@ impl CaptureManager {
             crate::cosmic::enable_output(&evdi_names).await;
             return;
         }
+        // GNOME places and switches on a new monitor by itself.
+        if crate::gnome::active() {
+            return;
+        }
+        if crate::x11::active() {
+            crate::x11::enable_output(&evdi_names, position).await;
+            return;
+        }
 
         // Retry: KWin may not have registered the new EVDI device yet.
         // Use -j (JSON) rather than the plain "-o" text listing: newer
@@ -551,6 +559,13 @@ impl CaptureManager {
         }
         if crate::cosmic::active() {
             crate::cosmic::disable_output(&evdi_names).await;
+            return;
+        }
+        if crate::gnome::active() {
+            return;
+        }
+        if crate::x11::active() {
+            crate::x11::disable_output(&evdi_names).await;
             return;
         }
         let Ok(o) = tokio::process::Command::new("kscreen-doctor")

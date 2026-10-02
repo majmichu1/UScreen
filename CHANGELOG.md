@@ -12,6 +12,16 @@ Full notes for each version are on the
   touching down. The app now reads the button from every pen event
   ([#23](https://github.com/majmichu1/UScreen/issues/23),
   [#25](https://github.com/majmichu1/UScreen/issues/25)).
+- Pen and touch are mapped onto the tablet's screen on GNOME (Wayland) and on
+  X11 sessions other than Plasma, which used to be manual everywhere but KDE
+  and Hyprland ([#4](https://github.com/majmichu1/UScreen/issues/4)). On
+  GNOME the daemon writes the per-device `output` setting that Settings →
+  Wacom Tablet → Map to Monitor writes, with the monitor's identity taken from
+  mutter itself; on X11 it runs `xinput map-to-output` and `xrandr` (the
+  `xinput` package is needed). Neither is confirmed on real hardware yet — the
+  log shows each step and `uscreen doctor` says which path is in use. Also,
+  the daemon no longer spends three seconds waiting for `kscreen-doctor` on
+  desktops that do not have it.
 - Fix: red and blue swapped on the tablet (a blue desktop arriving orange).
   The capture helper read every framebuffer as B,G,R,x, but the compositor
   chooses the pixel format and can hand the virtual screen over as

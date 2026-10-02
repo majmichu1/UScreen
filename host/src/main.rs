@@ -6,6 +6,7 @@ mod edid;
 #[cfg(feature = "inproc-encoder")]
 mod encoder;
 mod encoders;
+mod gnome;
 mod hyprland;
 mod kwin;
 mod input;
@@ -16,6 +17,7 @@ mod stream;
 mod tray;
 mod update;
 mod vdisplay;
+mod x11;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};

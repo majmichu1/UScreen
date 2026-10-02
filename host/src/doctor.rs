@@ -148,6 +148,8 @@ async fn check_tools(r: &mut Report, cfg: &FileConfig) {
         } else {
             if crate::hyprland::active() {
                 r.line(Level::Ok, tool, "not needed on Hyprland (hyprctl is used)");
+            } else if crate::gnome::active() || crate::x11::active() || crate::cosmic::active() {
+                r.line(Level::Ok, tool, "not needed on this desktop");
             } else {
                 r.line(Level::Warn, tool, "not installed (KDE only)");
             }
@@ -540,6 +542,14 @@ async fn check_osk(r: &mut Report) {
         r.line(Level::Ok, "Hyprland", "hyprctl maps touch and pen onto the tablet's output");
         return;
     }
+    if crate::gnome::active() {
+        r.line(Level::Ok, "GNOME", "pen and touch are mapped through GNOME's per-device settings");
+        return;
+    }
+    if crate::x11::active() {
+        r.line(Level::Ok, "X11", "pen and touch are mapped with xinput map-to-output");
+        return;
+    }
     // KWin is only there on Plasma. On COSMIC or GNOME its absence is not a
     // fault, and a FAIL sent people hunting for a qdbus package (#26).
     let session = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
@@ -549,11 +559,16 @@ async fn check_osk(r: &mut Report) {
             "desktop",
             &format!("{} — pen and touch mapping is manual here", session),
         );
-        r.hint(
-            "UScreen maps the tablet's input onto its screen automatically only on KDE Plasma \
-             and Hyprland. Elsewhere, assign the \"UScreen Pen\" and \"UScreen Touch\" devices \
-             to the UScreen output in your desktop's settings.",
-        );
+        if std::env::var("XDG_SESSION_TYPE").is_ok_and(|t| t == "x11") && !command_exists("xinput") {
+            r.hint("install the `xinput` package and UScreen maps the pen and touch itself on X11");
+        } else {
+            r.hint(
+                "UScreen maps the tablet's input onto its screen automatically on KDE Plasma, \
+                 Hyprland, GNOME (Wayland) and X11 sessions. Elsewhere, assign the \"UScreen \
+                 Pen\" and \"UScreen Touch\" devices to the UScreen output in your desktop's \
+                 settings.",
+            );
+        }
         return;
     }
     // Whether we can reach KWin at all decides whether touch and pen land on

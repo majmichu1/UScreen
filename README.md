@@ -167,8 +167,9 @@ display settings. Graphics-tablet mode is a separate, non-display mode.
 proper tablet device.
 
 **Does it work on Bazzite / KDE Wayland?** That is the reference setup.
-Hyprland is handled through `hyprctl` since 1.2.7. GNOME and X11 get the
-display and the stream; input mapping is manual there.
+Hyprland is handled through `hyprctl` since 1.2.7, and GNOME (Wayland) and X11
+get pen and touch mapping from 1.2.8 (not yet confirmed on real hardware).
+Other desktops get the display and the stream; mapping is manual there.
 
 **Does it need a dummy HDMI plug?** No.
 
@@ -209,8 +210,9 @@ icon, any-side placement, several tablets, HEVC and 10-bit, Wi-Fi fallback,
 packages for five distribution families, `uscreen doctor`, measured latency.
 
 Next: **AOA transport** — removing the USB-debugging requirement, the last
-step between this and simply plugging a cable in. Then input mapping on
-GNOME and X11 ([#4](https://github.com/majmichu1/UScreen/issues/4)), and a
+step between this and simply plugging a cable in. Input mapping on
+GNOME and X11 ([#4](https://github.com/majmichu1/UScreen/issues/4)) is in as of
+1.2.8 but waiting for someone to confirm it on a real desktop; then a
 **PipeWire/dmabuf capture path**: the EVDI cycle is serial by design (the
 compositor copies the frame out of the GPU, then the helper copies it again,
 then the compositor renders the next one), which caps native 2960×1848 at
