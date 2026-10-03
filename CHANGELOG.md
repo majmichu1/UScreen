@@ -3,7 +3,7 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
-## Unreleased
+## 1.2.8 — 2026-10-03
 
 - App: the S Pen side button works while the pen hovers. Android reports it
   as a separate press event only sometimes, and never to the touch listener
@@ -29,20 +29,21 @@ Full notes for each version are on the
   whose picture was fine until a reboot
   ([#29](https://github.com/majmichu1/UScreen/issues/29)). The helper now
   takes the channel order from the format libevdi reports, for all four
-  32-bit RGB layouts, and logs when it is not the usual one. The Night Light
-  and Reading mode checks in the doctor stay: those filters tint the same way.
-- COSMIC: the daemon switches the virtual output on with `cosmic-randr`.
-  COSMIC leaves a new EVDI output disabled, so nothing was rendered to it, the
-  helper saw almost no frames and the tablet restarted its connection over and
-  over ([#26](https://github.com/majmichu1/UScreen/issues/26)). Pen and touch
-  mapping stays manual there. Not yet confirmed on a real COSMIC session; the
-  log shows every `cosmic-randr` answer.
+  32-bit RGB layouts, and logs when it is not the usual one. Checked against
+  all four layouts with pure red, green and blue; not yet confirmed by the
+  reporter, whose log line would settle it.
+- COSMIC: if the virtual output is off, the daemon switches it on with
+  `cosmic-randr` (it used to look for `kscreen-doctor` and wait three seconds
+  for nothing). In [#26](https://github.com/majmichu1/UScreen/issues/26) the
+  output turned out to be on already, so that report's flashing picture is a
+  different problem and is still open. Pen and touch mapping stays manual on
+  COSMIC. Not confirmed on a real COSMIC session; the log shows every
+  `cosmic-randr` answer.
 - App: the S Pen button is also recognised when a Samsung build reports it as
   a secondary mouse button rather than the stylus button.
 - `uscreen doctor` flags Android's Night Light and Xiaomi's Reading mode, not
-  only Samsung's blue light filter. A scheduled filter looks right in the
-  afternoon and orange after an evening reboot
-  ([#29](https://github.com/majmichu1/UScreen/issues/29)).
+  only Samsung's blue light filter. They warm the picture too, and a schedule
+  makes it look right in the afternoon and wrong in the evening.
 - App: the settings sheet scrolls. On a short landscape screen, like a Fire 7's
   600 px, everything below the first few settings was out of reach
   ([#27](https://github.com/majmichu1/UScreen/issues/27)).

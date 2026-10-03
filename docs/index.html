@@ -29,9 +29,9 @@
   "alternateName": "UScreen",
   "applicationCategory": "UtilitiesApplication",
   "operatingSystem": "Linux, Android 8.1+",
-  "softwareVersion": "1.2.7",
-  "datePublished": "2026-09-26",
-  "dateModified": "2026-09-26",
+  "softwareVersion": "1.2.8",
+  "datePublished": "2026-10-03",
+  "dateModified": "2026-10-03",
   "releaseNotes": "https://github.com/majmichu1/UScreen/blob/main/CHANGELOG.md",
   "license": "https://opensource.org/licenses/MIT",
   "isAccessibleForFree": true,
@@ -64,7 +64,7 @@
     {"@type": "Question", "name": "Can an Android tablet be used as a real second monitor on Linux?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. UScreen creates a virtual display through the EVDI kernel module, so the tablet appears in the display settings like any monitor. It extends the desktop rather than mirroring it."}},
     {"@type": "Question", "name": "Does UScreen require USB tethering or Wi-Fi?", "acceptedAnswer": {"@type": "Answer", "text": "No. It uses the adb connection provided by USB debugging over a normal data-capable USB cable; USB debugging must be enabled on the tablet, USB tethering is not needed. Wi-Fi works as a fallback with more stutter."}},
     {"@type": "Question", "name": "Does UScreen support Samsung S Pen pressure and tilt?", "acceptedAnswer": {"@type": "Answer", "text": "Yes: pressure, tilt, the eraser end and the stylus button are forwarded to Linux as a graphics-tablet device, so Krita, GIMP and Blender see a real tablet."}},
-    {"@type": "Question", "name": "Does UScreen work on Bazzite and KDE Wayland?", "acceptedAnswer": {"@type": "Answer", "text": "That is the reference setup. KDE Plasma on Wayland gets automatic display placement, input mapping and on-screen keyboard suppression. Hyprland gets the output switched on and the input mapped through hyprctl. Other desktops get the display and the stream; input mapping is manual."}},
+    {"@type": "Question", "name": "Does UScreen work on Bazzite and KDE Wayland?", "acceptedAnswer": {"@type": "Answer", "text": "That is the reference setup. KDE Plasma on Wayland gets automatic display placement, input mapping and on-screen keyboard suppression. Hyprland gets the output switched on and the input mapped through hyprctl, and GNOME on Wayland and X11 sessions get the pen and touch mapped automatically (new in 1.2.8, not yet confirmed on real hardware). Other desktops get the display and the stream; input mapping is manual."}},
     {"@type": "Question", "name": "Does UScreen require a dummy HDMI plug?", "acceptedAnswer": {"@type": "Answer", "text": "No. The virtual display is created in software by the EVDI kernel module."}},
     {"@type": "Question", "name": "What Android versions are supported?", "acceptedAnswer": {"@type": "Answer", "text": "Android 8.1 and newer, on any tablet with a hardware H.264 decoder."}},
     {"@type": "Question", "name": "Is screen or input data sent to the cloud?", "acceptedAnswer": {"@type": "Answer", "text": "No. Screen and input data never leave the cable (or your own network on Wi-Fi). The only outbound request is an optional check of the latest release on GitHub, which can be turned off."}},
@@ -254,9 +254,9 @@
     <h1>Your Android tablet, as a <em>real</em> second monitor. Over one USB cable.</h1>
     <p class="lead">UScreen creates an extended display on the Linux side, streams it to the tablet with hardware encoding, and hands the <strong>S Pen back as a graphics tablet</strong> — pressure, tilt, eraser, button. No Wi-Fi, no tethering, no dummy plug, no account.</p>
     <div class="cta">
-      <a class="btn primary" href="https://github.com/majmichu1/UScreen/releases/latest">Download 1.2.7</a>
+      <a class="btn primary" href="https://github.com/majmichu1/UScreen/releases/latest">Download 1.2.8</a>
       <a class="btn" href="#install">Install in three steps</a>
-      <span class="meta">MIT · Linux + Android 8.1+ · released <time datetime="2026-09-26">2026-09-26</time></span>
+      <span class="meta">MIT · Linux + Android 8.1+ · released <time datetime="2026-10-03">2026-10-03</time></span>
     </div>
   </div>
 
@@ -343,10 +343,10 @@
   <table>
     <thead><tr><th>File</th><th>Distribution</th><th>Command</th></tr></thead>
     <tbody>
-      <tr><td><code>uscreen_1.2.7_amd64.deb</code></td><td>Debian 12+, Ubuntu 22.04+, Mint, Pop</td><td><code>sudo apt install ./uscreen_*.deb</code></td></tr>
-      <tr><td><code>uscreen-1.2.7-1.x86_64.rpm</code></td><td>openSUSE · Fedora (RPM Fusion first)</td><td><code>zypper install ./uscreen-*.rpm</code> · <code>dnf install --allowerasing ./uscreen-*.rpm</code></td></tr>
-      <tr><td><code>uscreen-1.2.7-PKGBUILD.tar.gz</code></td><td>Arch, Manjaro, EndeavourOS, CachyOS</td><td><code>makepkg -si</code></td></tr>
-      <tr><td><code>uscreen-1.2.7-linux-x86_64.tar.gz</code></td><td>Bazzite, Nobara, anything else</td><td><code>./scripts/install.sh</code></td></tr>
+      <tr><td><code>uscreen_1.2.8_amd64.deb</code></td><td>Debian 12+, Ubuntu 22.04+, Mint, Pop</td><td><code>sudo apt install ./uscreen_*.deb</code></td></tr>
+      <tr><td><code>uscreen-1.2.8-1.x86_64.rpm</code></td><td>openSUSE · Fedora (RPM Fusion first)</td><td><code>zypper install ./uscreen-*.rpm</code> · <code>dnf install --allowerasing ./uscreen-*.rpm</code></td></tr>
+      <tr><td><code>uscreen-1.2.8-PKGBUILD.tar.gz</code></td><td>Arch, Manjaro, EndeavourOS, CachyOS</td><td><code>makepkg -si</code></td></tr>
+      <tr><td><code>uscreen-1.2.8-linux-x86_64.tar.gz</code></td><td>Bazzite, Nobara, anything else</td><td><code>./scripts/install.sh</code></td></tr>
       <tr><td><code>uscreen.apk</code></td><td>the tablet</td><td>install, enable USB debugging</td></tr>
     </tbody>
   </table>
@@ -418,7 +418,7 @@
   <details open><summary>Does it need Wi-Fi or USB tethering?</summary><p>No. It uses the adb connection that USB debugging provides, over a normal data-capable USB cable — USB debugging has to be on, USB tethering does not. Wi-Fi is an optional fallback with more stutter.</p></details>
   <details><summary>Is it a mirror or an extension?</summary><p>An extension — a real monitor in your display settings. Graphics-tablet mode is a separate, non-display mode.</p></details>
   <details><summary>Does S Pen pressure and tilt work?</summary><p>Yes, plus the eraser end and the stylus button, as a proper tablet device.</p></details>
-  <details><summary>Does it work on Bazzite and KDE Wayland?</summary><p>That is the reference setup. Hyprland is handled through hyprctl. GNOME and X11 get the display and the stream; input mapping is manual there for now.</p></details>
+  <details><summary>Does it work on Bazzite and KDE Wayland?</summary><p>That is the reference setup. Hyprland is handled through hyprctl, and GNOME on Wayland and X11 get pen and touch mapping from 1.2.8 (not yet confirmed on real hardware). Other desktops get the display and the stream; input mapping is manual there.</p></details>
   <details><summary>Does it need a dummy HDMI plug?</summary><p>No. The virtual display is created in software by EVDI.</p></details>
   <details><summary>Which Android versions?</summary><p>8.1 and newer, on any device with a hardware H.264 decoder.</p></details>
   <details><summary>Is anything sent to the cloud?</summary><p>No. Screen and input data never leave the cable. The only outbound request is an optional check of the latest release tag on GitHub, and <code>check_updates = false</code> turns it off.</p></details>
@@ -429,8 +429,8 @@
 <section class="provenance" aria-label="Provenance">
   <dl>
     <div><dt>Maintained by</dt><dd><a href="https://github.com/majmichu1">majmichu1</a></dd></div>
-    <div><dt>Current release</dt><dd><a href="https://github.com/majmichu1/UScreen/releases/latest">1.2.7</a> · <a href="https://github.com/majmichu1/UScreen/blob/main/CHANGELOG.md">changelog</a></dd></div>
-    <div><dt>Last updated</dt><dd><time datetime="2026-09-26">2026-09-26</time></dd></div>
+    <div><dt>Current release</dt><dd><a href="https://github.com/majmichu1/UScreen/releases/latest">1.2.8</a> · <a href="https://github.com/majmichu1/UScreen/blob/main/CHANGELOG.md">changelog</a></dd></div>
+    <div><dt>Last updated</dt><dd><time datetime="2026-10-03">2026-10-03</time></dd></div>
     <div><dt>Verified on</dt><dd>Bazzite KDE Wayland (maintainer) · Arch Linux KDE Wayland, installer and PKGBUILD (<a href="https://github.com/majmichu1/UScreen/issues/2#issuecomment-5478643599">report 1</a>, <a href="https://github.com/majmichu1/UScreen/issues/3#issuecomment-5494961262">report 2</a>) · Fedora 44 KDE with a Tab S9 FE (<a href="https://github.com/majmichu1/UScreen/discussions/7">report 3</a>)</dd></div>
   </dl>
 </section>

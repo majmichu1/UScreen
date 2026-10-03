@@ -1,5 +1,5 @@
 Name:           uscreen
-Version:        1.2.7
+Version:        1.2.8
 Release:        1%{?dist}
 Summary:        Android tablet as a USB second display and graphics tablet
 License:        MIT
