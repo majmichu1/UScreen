@@ -3,6 +3,26 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
+## Unreleased
+
+- Graphics-tablet mode on Plasma 6 picks the primary screen properly. Plasma 6
+  replaced the `primary` flag with a `priority` (1 is primary), the daemon only
+  looked for the flag, found none and took the first enabled output in the
+  list — on a multi-monitor desktop not necessarily the screen in front of you.
+- X11: the virtual output is recognised by its EDID instead of its name. Xorg
+  does not call an EVDI output `DVI-I-1` as the kernel does but `DVI-I-1-1`,
+  so the X11 support added in 1.2.8 would not have found it at all; matching
+  on the EDID we wrote also stops a real monitor that happens to be called
+  `DVI-I-1` from being mistaken for ours.
+- App: *Rotate automatically* works on tablets whose natural orientation is
+  landscape (many Lenovo, Fire and Wacom tablets). The sensor reports angles
+  from the panel's natural upright, and the app assumed that was portrait, so
+  on those tablets holding them normally asked for nothing and turning one to
+  portrait flipped the picture upside down. Phones and portrait-natural
+  tablets behave exactly as before.
+- App: the app's data is no longer included in Android backups; it holds the
+  session token the daemon hands the tablet.
+
 ## 1.2.8 — 2026-10-03
 
 - App: the S Pen side button works while the pen hovers. Android reports it

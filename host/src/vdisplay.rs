@@ -41,6 +41,10 @@ pub struct EvdiConnector {
     pub name: String,
     pub card: u32,
     pub connected: bool,
+    /// The EDID the kernel holds for this connector (ours, written by the
+    /// helper); empty when it cannot be read. X11 names the same output
+    /// differently (`DVI-I-1-1`), so this is what identifies it there.
+    pub edid: Vec<u8>,
 }
 
 /// Enumerate the connectors of every EVDI card. Used to address the virtual
@@ -71,10 +75,12 @@ pub fn evdi_connectors() -> Vec<EvdiConnector> {
         let connected = std::fs::read_to_string(entry.path().join("status"))
             .map(|s| s.trim() == "connected")
             .unwrap_or(false);
+        let edid = std::fs::read(entry.path().join("edid")).unwrap_or_default();
         out.push(EvdiConnector {
             name: connector.to_string(),
             card: idx,
             connected,
+            edid,
         });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));

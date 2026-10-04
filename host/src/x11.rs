@@ -49,6 +49,43 @@ pub struct Output {
     /// Width, height, x, y — present only while the output shows something.
     pub geometry: Option<(i64, i64, i64, i64)>,
     pub primary: bool,
+    /// The output's EDID as `xrandr --prop` prints it; empty if it has none.
+    pub edid: Vec<u8>,
+}
+
+/// One of our virtual outputs, as the kernel knows it.
+struct Target {
+    name: String,
+    edid: Vec<u8>,
+}
+
+fn targets_for(names: &[String]) -> Vec<Target> {
+    crate::vdisplay::evdi_connectors()
+        .into_iter()
+        .filter(|c| names.contains(&c.name))
+        .map(|c| Target { name: c.name, edid: c.edid })
+        .collect()
+}
+
+/// Whether the X output `o` is one of `targets`.
+///
+/// Xorg does not call an EVDI output by its kernel name: an output of a
+/// secondary GPU gets a suffix, so `DVI-I-1` in sysfs shows up as `DVI-I-1-1`
+/// in xrandr. The EDID is the reliable identity — it is the one we wrote — and
+/// it also keeps a real DVI monitor that really is called `DVI-I-1` from being
+/// taken for ours. Only when an output has no EDID to compare does the name
+/// decide, with the suffix allowed.
+fn is_ours(o: &Output, targets: &[Target]) -> bool {
+    targets.iter().any(|t| {
+        if !o.edid.is_empty() && !t.edid.is_empty() {
+            return o.edid == t.edid;
+        }
+        o.name == t.name
+            || o.name
+                .strip_prefix(t.name.as_str())
+                .and_then(|r| r.strip_prefix('-'))
+                .is_some_and(|d| !d.is_empty() && d.bytes().all(|c| c.is_ascii_digit()))
+    })
 }
 
 /// `1920x1080+0+0` → (1920, 1080, 0, 0).
@@ -59,11 +96,32 @@ fn parse_geometry(token: &str) -> Option<(i64, i64, i64, i64)> {
     Some((w.parse().ok()?, h.parse().ok()?, x.parse().ok()?, y.parse().ok()?))
 }
 
+fn hex_bytes(s: &str) -> Option<Vec<u8>> {
+    if s.is_empty() || !s.len().is_multiple_of(2) || !s.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok()).collect()
+}
+
 fn parse_outputs(text: &str) -> Vec<Output> {
-    let mut outs = Vec::new();
+    let mut outs: Vec<Output> = Vec::new();
+    let mut in_edid = false;
     for line in text.lines() {
-        // Mode lines are indented; output lines start at column 0.
-        if line.starts_with(' ') || line.starts_with("Screen") {
+        // Mode and property lines are indented; output lines start at column 0.
+        if line.starts_with(char::is_whitespace) {
+            let t = line.trim();
+            if t == "EDID:" {
+                in_edid = true;
+            } else if in_edid {
+                match (hex_bytes(t), outs.last_mut()) {
+                    (Some(b), Some(o)) => o.edid.extend(b),
+                    _ => in_edid = false,
+                }
+            }
+            continue;
+        }
+        in_edid = false;
+        if line.starts_with("Screen") {
             continue;
         }
         let mut t = line.split_whitespace();
@@ -77,25 +135,27 @@ fn parse_outputs(text: &str) -> Vec<Output> {
             connected: state == "connected",
             geometry: rest.iter().take(2).find_map(|x| parse_geometry(x)),
             primary: rest.first() == Some(&"primary"),
+            edid: Vec::new(),
         });
     }
     outs
 }
 
 async fn outputs() -> Option<Vec<Output>> {
-    let (ok, text) = run("xrandr", &["--query"]).await?;
+    let (ok, text) = run("xrandr", &["--prop"]).await?;
     ok.then(|| parse_outputs(&text))
 }
 
 /// Switch one of `names` on if it is connected but showing nothing, on the
 /// requested side of the other screens.
 pub async fn enable_output(names: &[String], position: crate::config::Position) {
+    let targets = targets_for(names);
     for attempt in 0..15 {
         if attempt > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
         let Some(all) = outputs().await else { continue };
-        let Some(mine) = all.iter().find(|o| o.connected && names.contains(&o.name)) else {
+        let Some(mine) = all.iter().find(|o| o.connected && is_ours(o, &targets)) else {
             continue;
         };
         if mine.geometry.is_some() {
@@ -103,7 +163,7 @@ pub async fn enable_output(names: &[String], position: crate::config::Position) 
         }
         let active: Vec<&Output> = all
             .iter()
-            .filter(|o| o.geometry.is_some() && !names.contains(&o.name))
+            .filter(|o| o.geometry.is_some() && !is_ours(o, &targets))
             .collect();
         // Relative to the screen at the edge it is going next to.
         let edge = |key: fn(&(i64, i64, i64, i64)) -> i64, largest: bool| {
@@ -130,12 +190,13 @@ pub async fn enable_output(names: &[String], position: crate::config::Position) 
         }
         return;
     }
-    warn!("The EVDI output did not appear in `xrandr --query` within 3s");
+    warn!("The EVDI output did not appear in `xrandr --prop` within 3s");
 }
 
 pub async fn disable_output(names: &[String]) {
+    let targets = targets_for(names);
     let Some(all) = outputs().await else { return };
-    for o in all.iter().filter(|o| names.contains(&o.name) && o.geometry.is_some()) {
+    for o in all.iter().filter(|o| is_ours(o, &targets) && o.geometry.is_some()) {
         info!("Disabling X11 output {}", o.name);
         let _ = run("xrandr", &["--output", &o.name, "--off"]).await;
     }
@@ -143,11 +204,12 @@ pub async fn disable_output(names: &[String]) {
 
 /// The first of `names` that is showing something, waiting up to `timeout`.
 pub async fn wait_active(names: &[String], timeout: std::time::Duration) -> Option<String> {
+    let targets = targets_for(names);
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         if let Some(o) = outputs()
             .await
-            .and_then(|all| all.into_iter().find(|o| o.geometry.is_some() && names.contains(&o.name)))
+            .and_then(|all| all.into_iter().find(|o| o.geometry.is_some() && is_ours(o, &targets)))
         {
             return Some(o.name);
         }
@@ -161,8 +223,9 @@ pub async fn wait_active(names: &[String], timeout: std::time::Duration) -> Opti
 /// The screen the user is looking at, for graphics-tablet mode: the primary
 /// one unless it is ours, else the first real one that is on.
 pub async fn primary_output(ours: &[String]) -> Option<String> {
+    let targets = targets_for(ours);
     let all = outputs().await?;
-    let real: Vec<&Output> = all.iter().filter(|o| o.geometry.is_some() && !ours.contains(&o.name)).collect();
+    let real: Vec<&Output> = all.iter().filter(|o| o.geometry.is_some() && !is_ours(o, &targets)).collect();
     real.iter().find(|o| o.primary).or_else(|| real.first()).map(|o| o.name.clone())
 }
 
@@ -206,25 +269,61 @@ pub async fn map_devices(wanted: &[&str], output: &str) -> usize {
 mod tests {
     use super::*;
 
-    const QUERY: &str = "Screen 0: minimum 320 x 200, current 1920 x 1080, maximum 16384 x 16384\n\
+    fn hex_block(edid: &[u8]) -> String {
+        edid.chunks(16)
+            .map(|c| format!("\t\t{}\n", c.iter().map(|b| format!("{:02x}", b)).collect::<String>()))
+            .collect()
+    }
+
+    fn prop_output(edid_ours: &[u8], edid_real: &[u8]) -> String {
+        format!(
+            "Screen 0: minimum 320 x 200, current 1920 x 1080, maximum 16384 x 16384\n\
 eDP-1 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis) 344mm x 193mm\n\
+\tEDID:\n{real}\tscaling mode: Full aspect\n\
    1920x1080     60.01*+  48.01\n\
 HDMI-1 disconnected (normal left inverted right x axis y axis)\n\
-DVI-I-1 connected (normal left inverted right x axis y axis) 314mm x 195mm\n\
-   2960x1848     90.00 +\n\
-DP-2 connected 1280x1024+1920+0 (normal left inverted right x axis y axis) 376mm x 301mm\n";
+DVI-I-1 connected 1280x1024+1920+0 (normal left inverted right x axis y axis) 376mm x 301mm\n\
+\tEDID:\n{real}\
+DVI-I-1-1 connected (normal left inverted right x axis y axis) 314mm x 195mm\n\
+\tEDID:\n{ours}\tBorder: 0 0 0 0\n\
+   2960x1848     90.00 +\n",
+            real = hex_block(edid_real),
+            ours = hex_block(edid_ours),
+        )
+    }
 
     #[test]
-    fn reads_which_outputs_are_on() {
-        let o = parse_outputs(QUERY);
+    fn reads_outputs_and_their_edid_from_xrandr_prop() {
+        let ours = crate::edid::make_edid(2960, 1848, 90);
+        let real = vec![0x11u8; 128];
+        let o = parse_outputs(&prop_output(&ours, &real));
         assert_eq!(o.len(), 4);
         assert_eq!(o[0].geometry, Some((1920, 1080, 0, 0)));
-        assert!(o[0].primary);
+        assert!(o[0].primary && o[0].edid == real);
         assert!(!o[1].connected);
-        assert_eq!(o[2].name, "DVI-I-1");
-        assert!(o[2].connected && o[2].geometry.is_none());
-        assert_eq!(o[3].geometry, Some((1280, 1024, 1920, 0)));
-        assert!(!o[3].primary);
+        assert_eq!(o[3].name, "DVI-I-1-1");
+        assert!(o[3].connected && o[3].geometry.is_none());
+        assert_eq!(o[3].edid, ours);
+    }
+
+    #[test]
+    fn finds_our_output_by_edid_not_by_name() {
+        let ours = crate::edid::make_edid(2960, 1848, 90);
+        let o = parse_outputs(&prop_output(&ours, &[0x11u8; 128]));
+        // The kernel calls it DVI-I-1; so does a real monitor on the main GPU.
+        let targets = vec![Target { name: "DVI-I-1".into(), edid: ours }];
+        let found: Vec<&str> = o.iter().filter(|x| is_ours(x, &targets)).map(|x| x.name.as_str()).collect();
+        assert_eq!(found, ["DVI-I-1-1"]);
+    }
+
+    #[test]
+    fn falls_back_to_the_suffixed_name_without_an_edid() {
+        let o = |name: &str| Output { name: name.into(), connected: true, geometry: None, primary: false, edid: Vec::new() };
+        let t = vec![Target { name: "DVI-I-2".into(), edid: Vec::new() }];
+        assert!(is_ours(&o("DVI-I-2"), &t));
+        assert!(is_ours(&o("DVI-I-2-1"), &t));
+        assert!(!is_ours(&o("DVI-I-2-x"), &t));
+        assert!(!is_ours(&o("DVI-I-1-1"), &t));
     }
 
     #[test]

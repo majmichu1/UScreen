@@ -681,6 +681,11 @@ async fn primary_non_evdi_output() -> Option<String> {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
     let outputs = v.get("outputs")?.as_array()?;
     let mut fallback = None;
+    // Plasma 6 dropped the boolean `primary` for a `priority` where 1 is the
+    // primary screen; looking only for `primary` found none and took the first
+    // enabled output in the list, which on a multi-monitor desktop is not
+    // necessarily the one in front of the user.
+    let mut best: Option<(u64, String)> = None;
     for o in outputs {
         let name = o.get("name").and_then(|v| v.as_str())?.to_string();
         if evdi.contains(&name) || !o.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false) {
@@ -689,9 +694,14 @@ async fn primary_non_evdi_output() -> Option<String> {
         if o.get("primary").and_then(|v| v.as_bool()).unwrap_or(false) {
             return Some(name);
         }
+        if let Some(p) = o.get("priority").and_then(|v| v.as_u64()) {
+            if best.as_ref().is_none_or(|(bp, _)| p < *bp) {
+                best = Some((p, name.clone()));
+            }
+        }
         fallback.get_or_insert(name);
     }
-    fallback
+    best.map(|(_, n)| n).or(fallback)
 }
 
 async fn kwin_device_property(sysname: &str, property: &str) -> Option<String> {

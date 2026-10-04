@@ -218,21 +218,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun startTiltListener() {
         if (tiltListener != null) return
+        // Whether the panel is naturally landscape decides how the sensor's
+        // angles read; see OrientationPolicy.
+        val display = windowManager.defaultDisplay
+        val size = android.graphics.Point().also { display.getRealSize(it) }
+        val naturalLandscape = OrientationPolicy.naturallyLandscape(size.x, size.y, display.rotation)
         tiltListener = object : android.view.OrientationEventListener(this) {
-            // Degrees clockwise from the panel's natural (portrait) upright.
-            // Held sideways one way the sensor reads about 270, the other
-            // about 90; those map to LANDSCAPE and REVERSE_LANDSCAPE. Only
-            // act inside ±35° of either so a tablet lying almost flat, or
-            // held upright, does not flip back and forth.
             override fun onOrientationChanged(orientation: Int) {
-                if (orientation == ORIENTATION_UNKNOWN) return
-                val want = when (orientation) {
-                    in 235..305 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                    in 55..125 -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
-                    else -> return
-                }
+                val want = OrientationPolicy.landscapeForSensor(orientation, naturalLandscape) ?: return
                 if (requestedOrientation != want) requestedOrientation = want
             }
         }.also { if (it.canDetectOrientation()) it.enable() else tiltListener = null }
