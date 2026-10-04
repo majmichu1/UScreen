@@ -20,6 +20,14 @@ Full notes for each version are on the
   on those tablets holding them normally asked for nothing and turning one to
   portrait flipped the picture upside down. Phones and portrait-natural
   tablets behave exactly as before.
+- Pen: lifting the pen now sends its last position before the tool leaves
+  proximity. The lift was one event frame that dropped the position and took
+  the tool out at once, and libinput ignores axes in a frame that ends
+  proximity, so every stroke stopped one sample short. The lift is now two
+  frames, tip up and then proximity out, like the touch-down already was.
+- Wireless debugging found by name (Android 11's `adb-…._adb-tls-connect._tcp`
+  serials, which have no colon) is recognised as Wi-Fi instead of USB, in the
+  daemon and in `uscreen doctor`.
 - App: the app's data is no longer included in Android backups; it holds the
   session token the daemon hands the tablet.
 

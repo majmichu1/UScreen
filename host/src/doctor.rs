@@ -313,7 +313,7 @@ async fn check_tablet(r: &mut Report, cfg: &FileConfig) {
     // well installed app as missing the moment `adb tcpip` was in use.
     let chosen: Option<&str> = devices
         .iter()
-        .find(|d| !d.contains(':'))
+        .find(|d| !crate::is_network_serial(d))
         .or_else(|| devices.first())
         .copied();
 
@@ -341,7 +341,7 @@ async fn check_tablet(r: &mut Report, cfg: &FileConfig) {
             // situation entirely: the daemon drives the first and the app is
             // launched there, so watching the other one shows a black screen.
             // Only the second kind has more than one USB serial.
-            let usb: Vec<&&str> = devices.iter().filter(|d| !d.contains(':')).collect();
+            let usb: Vec<&&str> = devices.iter().filter(|d| !crate::is_network_serial(d)).collect();
             if usb.len() > 1 {
                 let mut named = Vec::new();
                 for d in &devices {
@@ -908,7 +908,7 @@ pub async fn run() -> Result<()> {
 /// Worth reporting because the two transports differ by far more than the
 /// median suggests — the Wi-Fi tail is several times worse.
 fn report_transport(r: &mut Report, serial: &str) {
-    if serial.contains(':') {
+    if crate::is_network_serial(serial) {
         r.line(Level::Warn, "transport", "Wi-Fi — expect occasional stutter");
         r.hint("plug the USB cable in for steady latency; the daemon prefers it automatically");
     } else {

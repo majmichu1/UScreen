@@ -1417,10 +1417,17 @@ impl Transport {
     }
 }
 
-/// A network device's serial is its `host:port`; a USB serial never contains a
-/// colon. That is the whole distinction adb gives us without a second call.
+/// A network device's serial is its `host:port`, or — for Android 11's
+/// wireless debugging, which adb finds by mDNS — a name like
+/// `adb-R52WA0A0KED-aBcDeF._adb-tls-connect._tcp`, which has no colon. A USB
+/// serial is neither. That is the whole distinction adb gives us without a
+/// second call.
+pub fn is_network_serial(serial: &str) -> bool {
+    serial.contains(':') || serial.contains("._adb")
+}
+
 fn transport_of(serial: &str) -> Transport {
-    if serial.contains(':') {
+    if is_network_serial(serial) {
         Transport::Network
     } else {
         Transport::Usb
@@ -1638,4 +1645,20 @@ async fn list_displays() -> Result<()> {
         println!("{}", String::from_utf8_lossy(&out.stdout));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tells_network_serials_from_usb_ones() {
+        assert!(is_network_serial("192.168.1.20:5555"));
+        assert!(is_network_serial("adb-R52WA0A0KED-aBcDeF._adb-tls-connect._tcp"));
+        assert!(is_network_serial("adb-R52WA0A0KED-aBcDeF._adb-tls-pairing._tcp"));
+        assert!(!is_network_serial("R52WA0A0KED"));
+        assert!(!is_network_serial("emulator-5554"));
+        assert_eq!(transport_of("R52WA0A0KED"), Transport::Usb);
+        assert_eq!(transport_of("adb-X-y._adb-tls-connect._tcp"), Transport::Network);
+    }
 }

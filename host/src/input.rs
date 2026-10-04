@@ -534,10 +534,22 @@ impl UInputDevice {
                 self.syn()?;
             }
             1 => {
-                // UP
+                // UP, in two frames, mirroring DOWN.
+                //
+                // The lift position is the pen's last sample. It goes out with
+                // the tip coming up and the tool still in proximity: libinput
+                // ignores axes in the frame that takes the tool out, so with
+                // everything in one frame the last stretch of every stroke was
+                // cut by a sample.
+                self.emit(EV_ABS, ABS_X, x)?;
+                self.emit(EV_ABS, ABS_Y, y)?;
+                self.emit(EV_ABS, ABS_TILT_X, tilt_x)?;
+                self.emit(EV_ABS, ABS_TILT_Y, tilt_y)?;
                 self.emit(EV_KEY, BTN_TOUCH, 0)?;
-                self.emit(EV_KEY, tool, 0)?;
                 self.emit(EV_ABS, ABS_PRESSURE, 0)?;
+                self.syn()?;
+
+                self.emit(EV_KEY, tool, 0)?;
                 self.syn()?;
             }
             2 => {
@@ -1484,7 +1496,8 @@ fn handle_event(
                     false
                 };
                 if ok {
-                    if matches!(action, 0 | 2 | 3) {
+                    // Lift included: its position is the last the pen was seen at.
+                    if matches!(action, 0..=3) {
                         guard.last_pen_pos = (abs_x, abs_y);
                     }
                     // Leaving proximity hides the tablet cursor, so hand the
@@ -1620,5 +1633,63 @@ fn handle_event(
             );
             let _ = mode_tx.send(pen_only);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The event frames (split at SYN_REPORT) a device wrote into `path`.
+    fn frames(path: &std::path::Path) -> Vec<Vec<(u16, u16, i32)>> {
+        let bytes = std::fs::read(path).unwrap();
+        let (mut all, mut frame) = (Vec::new(), Vec::new());
+        for ev in bytes.chunks_exact(std::mem::size_of::<LinuxInputEvent>()) {
+            let kind = u16::from_ne_bytes(ev[16..18].try_into().unwrap());
+            let code = u16::from_ne_bytes(ev[18..20].try_into().unwrap());
+            let value = i32::from_ne_bytes(ev[20..24].try_into().unwrap());
+            if kind == EV_SYN {
+                all.push(std::mem::take(&mut frame));
+            } else {
+                frame.push((kind, code, value));
+            }
+        }
+        all
+    }
+
+    fn device_over_file(name: &str) -> (UInputDevice, std::path::PathBuf) {
+        let path = std::env::temp_dir().join(format!("uscreen-{}-{}", name, std::process::id()));
+        let file = OpenOptions::new().create(true).truncate(true).write(true).open(&path).unwrap();
+        (UInputDevice { file }, path)
+    }
+
+    #[test]
+    fn pen_lift_sends_its_position_before_leaving_proximity() {
+        let (mut dev, path) = device_over_file("penlift");
+        dev.inject_pen(100, 200, 900, 5, -5, 0, false).unwrap(); // down: 2 frames
+        dev.inject_pen(150, 250, 900, 5, -5, 2, false).unwrap(); // move
+        dev.inject_pen(111, 222, 0, 7, -7, 1, false).unwrap(); // up
+        let f = frames(&path);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(f.len(), 5, "down is two frames, move one, up two");
+        let tip_up = &f[3];
+        assert!(tip_up.contains(&(EV_ABS, ABS_X, 111)) && tip_up.contains(&(EV_ABS, ABS_Y, 222)));
+        assert!(tip_up.contains(&(EV_ABS, ABS_TILT_X, 7)));
+        assert!(tip_up.contains(&(EV_KEY, BTN_TOUCH, 0)));
+        assert!(
+            !tip_up.contains(&(EV_KEY, BTN_TOOL_PEN, 0)),
+            "the tool must still be in proximity while the last sample goes out"
+        );
+        assert_eq!(f[4], vec![(EV_KEY, BTN_TOOL_PEN, 0)], "proximity out in its own frame");
+    }
+
+    #[test]
+    fn eraser_lift_leaves_proximity_with_the_eraser_tool() {
+        let (mut dev, path) = device_over_file("eraserlift");
+        dev.inject_pen(10, 20, 500, 0, 0, 0, true).unwrap();
+        dev.inject_pen(10, 20, 0, 0, 0, 1, true).unwrap();
+        let f = frames(&path);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(f.last().unwrap(), &vec![(EV_KEY, BTN_TOOL_RUBBER, 0)]);
     }
 }
