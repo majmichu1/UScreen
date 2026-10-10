@@ -255,7 +255,7 @@ class TouchCapture {
                     notePenActivity(vw, vh)
                     sendPenEvent(event, actionIndex, 0, vw, vh)
                 } else {
-                    if (penIsActive()) return true
+                    if (penIsActive() || !touchEnabled) return true
                     val slot = slotOf(event, actionIndex)
                     downSlots.add(slot)
                     sendTouch(event.getX(actionIndex) / vw,
@@ -295,7 +295,7 @@ class TouchCapture {
                         }
                         sendPenEvent(event, i, 2, vw, vh)
                     } else {
-                        if (penIsActive()) continue
+                        if (penIsActive() || !touchEnabled) continue
                         sendTouch(event.getX(i) / vw,
                             event.getY(i) / vh,
                             event.getPressure(i).toDouble(),
@@ -615,10 +615,27 @@ class TouchCapture {
     /** The pen took over: anything a finger left pressed has to be lifted. */
     private fun notePenActivity(vw: Float, vh: Float) {
         lastPenNanos = System.nanoTime()
+        liftTouches()
+    }
+
+    /** Release every finger the host still thinks is pressed. */
+    private fun liftTouches() {
         if (downSlots.isNotEmpty()) {
             for (slot in downSlots.toList()) sendTouch(0f, 0f, 0.0, 1, slot)
             downSlots.clear()
         }
+    }
+
+    /**
+     * Fingers are only sent while this is on; the pen always is. Turning it
+     * off lifts whatever was pressed so nothing stays stuck on the host.
+     */
+    @Volatile var touchEnabled = true
+        private set
+
+    fun setTouchEnabled(on: Boolean) {
+        touchEnabled = on
+        if (!on) liftTouches()
     }
 
     // Lint only knows the public tool types; PALM is hidden but real.

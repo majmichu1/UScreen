@@ -84,6 +84,8 @@ class VideoReceiver {
      */
     private val queuedSinceOutput = AtomicInteger(0)
     @Volatile private var lastOutputNanos = 0L
+    /** When the first frame since the decoder last showed one was queued. */
+    @Volatile private var firstQueuedNanos = 0L
     private var outputStalls = 0
     private var outputsSinceStall = 0
     /**
@@ -576,7 +578,18 @@ class VideoReceiver {
                     )
                     if (!isConfig) {
                         val queued = queuedSinceOutput.incrementAndGet()
-                        val silentNs = System.nanoTime() - lastOutputNanos
+                        if (queued == 1) firstQueuedNanos = System.nanoTime()
+                        // Silence is counted from the first frame the decoder
+                        // was given, not from when it was created. After a
+                        // reconnect on a still screen the host sends only a
+                        // keepalive at 5 fps and a keyframe once per GOP —
+                        // twelve seconds at that rate — so a fresh decoder
+                        // sat idle for seconds before its first frame, and
+                        // the moment the fourth arrived it looked like it had
+                        // been stalled all that time. It restarted, the
+                        // socket closed, the host waited for the next keyframe
+                        // again, and the picture flashed forever (#26).
+                        val silentNs = System.nanoTime() - firstQueuedNanos
                         if (queued >= 4 && silentNs > 1_500_000_000L) {
                             outputStalls++
                             outputsSinceStall = 0
@@ -586,7 +599,7 @@ class VideoReceiver {
                             }
                             Log.w(
                                 TAG,
-                                "Decoder took $queued frames and showed none for " +
+                                "Decoder took $queued frames and showed none in " +
                                     "${silentNs / 1_000_000} ms — restarting as " +
                                     when (decoderTier) {
                                         0 -> "the hardware decoder"

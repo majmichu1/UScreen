@@ -43,6 +43,15 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putBoolean("show_stats", v).apply()
 
     /**
+     * Whether fingers are sent to the computer at all. Off leaves only the pen,
+     * which is what people drawing with a resting hand want (SuperDisplay has
+     * the same switch). Applies at once and stays the tablet's own business.
+     */
+    var touchEnabled: Boolean
+        get() = sp.getBoolean("touch_enabled", true)
+        set(v) = sp.edit().putBoolean("touch_enabled", v).apply()
+
+    /**
      * Which way round the tablet is held: [ORIENTATION_AUTO] follows the
      * sensor between the two landscape directions, the other two pin it.
      * Pinning exists because the sensor path does not work everywhere — a

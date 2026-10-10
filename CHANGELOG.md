@@ -3,8 +3,21 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
-## Unreleased
+## 1.2.9 — 2026-10-10
 
+- App: a still screen no longer makes the picture flash forever. After every
+  reconnect the host sends the codec config and then waits for the next
+  keyframe, which on a motionless desktop is twelve seconds away (a keyframe
+  every 60 frames, and an idle screen sends five frames a second). The
+  decoder watchdog counted its silence from the moment the decoder was
+  created, so when the fourth frame finally arrived it looked as if the
+  decoder had shown nothing for four seconds, restarted it, closed the socket,
+  and the cycle began again. It now counts from the first frame the decoder was
+  given ([#26](https://github.com/majmichu1/UScreen/issues/26)). Not seen on
+  hardware yet; the reporter's logcat shows exactly this pattern.
+- App: new *Touch input* switch in the settings sheet. Off sends only the pen
+  and no fingers at all, for drawing with a resting hand; it applies at once
+  and is remembered ([#30](https://github.com/majmichu1/UScreen/discussions/30)).
 - Graphics-tablet mode on Plasma 6 picks the primary screen properly. Plasma 6
   replaced the `primary` flag with a `priority` (1 is primary), the daemon only
   looked for the flag, found none and took the first enabled output in the

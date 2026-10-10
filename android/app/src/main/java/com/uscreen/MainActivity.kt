@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
         prefs = Prefs(this)
         applyOrientation()
         videoReceiver = VideoReceiver()
-        touchCapture = TouchCapture()
+        touchCapture = TouchCapture().also { it.setTouchEnabled(prefs.touchEnabled) }
         applyToken(intent, restart = false)
 
         // Close the host's latency measurement loop: every acknowledged frame
@@ -410,6 +410,7 @@ fun UScreenMain(
     var showOverlay by remember { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
     var showStats by remember { mutableStateOf(prefs?.showStats ?: false) }
+    var touchOn by remember { mutableStateOf(prefs?.touchEnabled ?: true) }
     var orientationChoice by remember { mutableStateOf(prefs?.orientation ?: Prefs.ORIENTATION_AUTO) }
 
     val context = LocalContext.current
@@ -608,6 +609,12 @@ fun UScreenMain(
                     showStats = it
                     prefs?.showStats = it
                 },
+                touchEnabled = touchOn,
+                onTouchEnabledChange = {
+                    touchOn = it
+                    prefs?.touchEnabled = it
+                    touchCapture?.setTouchEnabled(it)
+                },
                 orientation = orientationChoice,
                 onOrientationChange = {
                     orientationChoice = it
@@ -728,6 +735,8 @@ private fun SettingsSheet(
     onPenOnlyChange: (Boolean) -> Unit,
     showStats: Boolean,
     onShowStatsChange: (Boolean) -> Unit,
+    touchEnabled: Boolean,
+    onTouchEnabledChange: (Boolean) -> Unit,
     orientation: Int,
     onOrientationChange: (Int) -> Unit,
     onApply: (bitrateKbps: Int, fps: Int) -> Unit,
@@ -915,6 +924,28 @@ private fun SettingsSheet(
                 Switch(
                     checked = showStats,
                     onCheckedChange = onShowStatsChange,
+                    colors = SwitchDefaults.colors(checkedTrackColor = Accent)
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+
+            // Fingers or pen only. Applies at once; the host never sees it.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Touch input", fontSize = 14.sp, color = Color(0xFFB0B0C0))
+                    Text(
+                        "Off sends only the pen, which keeps a resting hand from doing anything",
+                        fontSize = 11.sp,
+                        color = Color(0xFF6A6A7E)
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = touchEnabled,
+                    onCheckedChange = onTouchEnabledChange,
                     colors = SwitchDefaults.colors(checkedTrackColor = Accent)
                 )
             }
