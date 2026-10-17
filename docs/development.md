@@ -156,3 +156,9 @@ Before that, for a new version:
 the Cargo/Gradle versions, the changelog entry) and stops with a message
 naming the stale file rather than publishing a page that still says the
 previous version. The date defaults to today; `RELEASE_DATE=YYYY-MM-DD` overrides it.
+
+## Xiaomi Focus Pen Pro squeeze
+
+Squeeze support uses ordinary Android key events and needs no Xiaomi SDK or
+special build flag. See [focus-pen-squeeze.md](focus-pen-squeeze.md) for the
+required HyperOS setting and hardware validation scope.

@@ -69,6 +69,11 @@ class TouchCapture {
 
     private val wsListener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            if (webSocket !== this@TouchCapture.webSocket) {
+                webSocket.cancel()
+                return
+            }
+            penButtons.reset()
             isConnected = true
             Log.i(TAG, "Connected")
             // Authenticate before anything else. If we have no token yet the
@@ -125,12 +130,16 @@ class TouchCapture {
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (webSocket !== this@TouchCapture.webSocket) return
             isConnected = false
+            penButtons.reset()
             scheduleReconnect()
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (webSocket !== this@TouchCapture.webSocket) return
             isConnected = false
+            penButtons.reset()
             Log.w(TAG, "Connection failed: ${t.message}")
             scheduleReconnect()
         }
@@ -170,7 +179,6 @@ class TouchCapture {
     }
 
     fun connect() {
-        penButtonDown = false
         // Idempotent: a second connect() must not leave the first socket
         // alive with its listener still flipping isConnected. onStart and a
         // token delivered through onNewIntent can both call this.
@@ -184,6 +192,7 @@ class TouchCapture {
     }
 
     private fun connectWebSocket() {
+        penButtons.reset()
         webSocket?.cancel()
         val request = Request.Builder()
             .url(WS_URL)
@@ -442,8 +451,15 @@ class TouchCapture {
         syncPenButton(event)
     }
 
-    /** The S Pen side button as the host last heard it. */
-    private var penButtonDown = false
+    private val penButtons = PenButtonState { down ->
+        if (isConnected) sendPenButton(down)
+    }
+
+    fun setSqueezeButtonDown(down: Boolean) {
+        if (isConnected) penButtons.setSqueeze(down)
+    }
+
+    fun releasePenButtons() = penButtons.release()
 
     /**
      * Send the side button whenever its state differs from what the host
@@ -459,10 +475,7 @@ class TouchCapture {
         // button instead of the stylus one.
         val down = (event.buttonState and
             (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_SECONDARY)) != 0
-        if (down != penButtonDown) {
-            penButtonDown = down
-            sendPenButton(down)
-        }
+        penButtons.setMotion(down)
     }
 
     private fun emitPen(x: Double, y: Double, pressure: Double,
@@ -481,6 +494,7 @@ class TouchCapture {
     }
 
     private fun sendPenButton(down: Boolean) {
+        Log.i(TAG, "Pen button ${if (down) "down" else "up"}")
         val msg = JSONObject().apply {
             put("type", "pen")
             put("x", 0.0)
@@ -496,12 +510,9 @@ class TouchCapture {
     }
 
     private fun sendPenProximityExit() {
-        // A button still held when the pen leaves would stay pressed on the
-        // host until the next press.
-        if (penButtonDown) {
-            penButtonDown = false
-            sendPenButton(false)
-        }
+        // MotionEvent buttons need proximity cleanup. Squeeze is a separate
+        // key DOWN/UP stream: brief hover dropouts must not release that key.
+        penButtons.leaveProximity()
         val msg = JSONObject().apply {
             put("type", "pen")
             put("x", 0.0)
@@ -646,6 +657,7 @@ class TouchCapture {
     fun isControlConnected(): Boolean = isConnected
 
     fun disconnect() {
+        releasePenButtons()
         reconnectJob?.cancel()
         webSocket?.close(1000, "Client closing")
         webSocket = null

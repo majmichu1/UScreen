@@ -22,6 +22,10 @@ Full notes for each version are on the
   back to the CPU. `vaapi_device` in the config chooses a node by hand, and
   `uscreen doctor` shows the one in use.
 
+- Xiaomi Focus Pen Pro squeeze maps to the primary stylus side button and
+  stays held across hover exits. Tested without a Xiaomi SDK on Pad 7 with
+  HyperOS set to switch brush/eraser; see [setup notes](docs/focus-pen-squeeze.md).
+
 ## 1.2.9 — 2026-10-10
 
 - App: a still screen no longer makes the picture flash forever. After every

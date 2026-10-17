@@ -42,6 +42,9 @@ class MainActivity : ComponentActivity() {
     private var showThanks by mutableStateOf(false)
     private var videoReceiver: VideoReceiver? = null
     private var touchCapture: TouchCapture? = null
+    private val xiaomiPen by lazy {
+        XiaomiPenSupport { down -> touchCapture?.setSqueezeButtonDown(down) }
+    }
     private lateinit var prefs: Prefs
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -314,6 +317,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        xiaomiPen.resume()
+    }
+
+    override fun onPause() {
+        touchCapture?.releasePenButtons()
+        xiaomiPen.pause()
+        super.onPause()
+    }
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (hasWindowFocus() && xiaomiPen.handleKeyEvent(event)) return true
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onGenericMotionEvent(event: android.view.MotionEvent): Boolean {
         val w = window.decorView.width
         val h = window.decorView.height
@@ -325,6 +344,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) touchCapture?.releasePenButtons()
         if (hasFocus) {
             enableImmersiveMode()
             // Re-assert once the window is actually attached: a request made in

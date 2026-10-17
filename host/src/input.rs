@@ -259,11 +259,21 @@ struct LinuxInputEvent {
     value: i32,
 }
 
+/// Virtual tool state; physical proximity may end while a key-based button is held.
+#[derive(Default)]
+struct PenState {
+    tool: Option<u16>,
+    last_tool: Option<u16>,
+    button_down: bool,
+    exit_pending: bool,
+}
+
 /// A uinput virtual input device for injecting touch/pen events into Linux.
 /// Touch and pen are SEPARATE devices: libinput classifies a touchscreen and
 /// a tablet pen differently and rejects a device that mixes both.
 struct UInputDevice {
     file: File,
+    pen_state: PenState,
 }
 
 impl UInputDevice {
@@ -304,7 +314,7 @@ impl UInputDevice {
 
         info!("uinput touchscreen '{}' created", name);
         std::thread::sleep(std::time::Duration::from_millis(200));
-        Ok(Self { file })
+        Ok(Self { file, pen_state: PenState::default() })
     }
 
     /// Pen tablet device: stylus tool + pressure + tilt.
@@ -343,7 +353,7 @@ impl UInputDevice {
 
         info!("uinput pen tablet '{}' created", name);
         std::thread::sleep(std::time::Duration::from_millis(200));
-        Ok(Self { file })
+        Ok(Self { file, pen_state: PenState::default() })
     }
 
     /// An absolute-positioning pointer, the same shape as a VM's virtual
@@ -373,7 +383,7 @@ impl UInputDevice {
 
         info!("uinput pointer '{}' created", name);
         std::thread::sleep(std::time::Duration::from_millis(200));
-        Ok(Self { file })
+        Ok(Self { file, pen_state: PenState::default() })
     }
 
     unsafe fn abs_setup(fd: i32, code: u16, min: i32, max: i32, resolution: i32) -> Result<()> {
@@ -528,13 +538,17 @@ impl UInputDevice {
                 self.emit(EV_ABS, ABS_TILT_X, tilt_x)?;
                 self.emit(EV_ABS, ABS_TILT_Y, tilt_y)?;
                 self.syn()?;
+                self.pen_state.tool = Some(tool);
+                self.pen_state.last_tool = Some(tool);
+                self.pen_state.exit_pending = false;
 
                 self.emit(EV_KEY, BTN_TOUCH, 1)?;
                 self.emit(EV_ABS, ABS_PRESSURE, pressure)?;
                 self.syn()?;
             }
             1 => {
-                // UP, in two frames, mirroring DOWN.
+                // UP: tip-up first, then proximity-out unless a button is
+                // still held. In that case proximity-out waits for button-up.
                 //
                 // The lift position is the pen's last sample. It goes out with
                 // the tip coming up and the tool still in proximity: libinput
@@ -549,8 +563,14 @@ impl UInputDevice {
                 self.emit(EV_ABS, ABS_PRESSURE, 0)?;
                 self.syn()?;
 
-                self.emit(EV_KEY, tool, 0)?;
-                self.syn()?;
+                if self.pen_state.button_down && self.pen_state.tool.is_some() {
+                    self.pen_state.exit_pending = true;
+                } else {
+                    self.emit(EV_KEY, tool, 0)?;
+                    self.syn()?;
+                    self.pen_state.tool = None;
+                    self.pen_state.exit_pending = false;
+                }
             }
             2 => {
                 // MOVE (pressing)
@@ -572,24 +592,62 @@ impl UInputDevice {
                 self.emit(EV_ABS, ABS_TILT_X, tilt_x)?;
                 self.emit(EV_ABS, ABS_TILT_Y, tilt_y)?;
                 self.syn()?;
+                self.pen_state.tool = Some(tool);
+                self.pen_state.last_tool = Some(tool);
+                self.pen_state.exit_pending = false;
             }
             4 => {
-                // HOVER_EXIT — pen left proximity
+                // A physical hover exit must not end an independently held
+                // squeeze: libinput releases tablet buttons on proximity-out,
+                // even while raw BTN_STYLUS remains down. Clear tip contact
+                // now, but keep the virtual tool until button-up. A new hover
+                // cancels this deferred exit; no position is synthesized.
+                let defer_exit = self.pen_state.button_down && self.pen_state.tool.is_some();
                 self.emit(EV_KEY, BTN_TOUCH, 0)?;
-                self.emit(EV_KEY, BTN_TOOL_PEN, 0)?;
-                self.emit(EV_KEY, BTN_TOOL_RUBBER, 0)?;
+                if !defer_exit {
+                    self.emit(EV_KEY, BTN_TOOL_PEN, 0)?;
+                    self.emit(EV_KEY, BTN_TOOL_RUBBER, 0)?;
+                }
                 self.emit(EV_ABS, ABS_PRESSURE, 0)?;
                 self.syn()?;
+                self.pen_state.exit_pending = defer_exit;
+                if !defer_exit {
+                    self.pen_state.tool = None;
+                }
             }
             5 => {
                 // STYLUS BUTTON DOWN (S Pen side button → right-click in GIMP)
+                // A key-based squeeze can arrive just after a hover dropout.
+                // Re-enter only if a real sample previously established a
+                // position; the kernel retains its axes across proximity-out.
+                // A first-ever button packet has no trustworthy coordinates.
+                if self.pen_state.tool.is_none() {
+                    if let Some(last_tool) = self.pen_state.last_tool {
+                        self.emit(EV_KEY, last_tool, 1)?;
+                        self.syn()?;
+                        self.pen_state.tool = Some(last_tool);
+                        self.pen_state.exit_pending = true;
+                    }
+                }
                 self.emit(EV_KEY, BTN_STYLUS, 1)?;
                 self.syn()?;
+                self.pen_state.button_down = true;
             }
             6 => {
                 // STYLUS BUTTON UP
                 self.emit(EV_KEY, BTN_STYLUS, 0)?;
                 self.syn()?;
+                self.pen_state.button_down = false;
+                if self.pen_state.exit_pending {
+                    // Button-up must reach libinput while its tool still
+                    // exists, before the deferred proximity-out frame.
+                    if let Some(tool) = self.pen_state.tool {
+                        self.emit(EV_KEY, tool, 0)?;
+                        self.syn()?;
+                    }
+                    self.pen_state.tool = None;
+                    self.pen_state.exit_pending = false;
+                }
             }
             _ => {}
         }
@@ -628,10 +686,6 @@ struct InjectDevices {
     /// Bitmask of MT slots that currently have an active tracking ID
     /// (DOWN received, no matching UP yet). Bit N → slot N, up to slot 15.
     active_slots: u16,
-    pen_proximity: bool,
-    /// S Pen side button currently held (BTN_STYLUS). Tracked so a held
-    /// button is released cleanly if the connection drops.
-    pen_button: bool,
 }
 
 impl InjectDevices {
@@ -654,24 +708,15 @@ impl InjectDevices {
         }
         self.active_slots = 0;
 
-        if self.pen_proximity {
-            if let Some(ref mut dev) = self.pen {
-                let _ = dev.emit(EV_KEY, BTN_TOUCH, 0);
-                let _ = dev.emit(EV_KEY, BTN_TOOL_PEN, 0);
-                let _ = dev.emit(EV_KEY, BTN_TOOL_RUBBER, 0);
-                let _ = dev.emit(EV_ABS, ABS_PRESSURE, 0);
-                let _ = dev.syn();
+        if let Some(ref mut dev) = self.pen {
+            if dev.pen_state.button_down {
+                let _ = dev.inject_pen(0, 0, 0, 0, 0, 6, false);
             }
-        }
-        self.pen_proximity = false;
-
-        if self.pen_button {
-            if let Some(ref mut dev) = self.pen {
-                let _ = dev.emit(EV_KEY, BTN_STYLUS, 0);
-                let _ = dev.syn();
+            if dev.pen_state.tool.is_some() {
+                let _ = dev.inject_pen(0, 0, 0, 0, 0, 4, false);
             }
+            dev.pen_state = PenState::default();
         }
-        self.pen_button = false;
     }
 }
 
@@ -1161,8 +1206,6 @@ impl InputServer {
                 pointer,
                 last_pen_pos: (0, 0),
                 active_slots: 0,
-                pen_proximity: false,
-                pen_button: false,
                 pointer_area: None,
             }
         })
@@ -1173,8 +1216,6 @@ impl InputServer {
             pointer: None,
             last_pen_pos: (0, 0),
             active_slots: 0,
-            pen_proximity: false,
-            pen_button: false,
             pointer_area: None,
         });
         let uinput = Arc::new(std::sync::Mutex::new(devices));
@@ -1482,6 +1523,7 @@ fn handle_event(
             let tilt_y_deg = (tilt_y.round() as i32).clamp(-90, 90);
 
             if let Ok(mut guard) = uinput.lock() {
+                let was_in_proximity = guard.pen.as_ref().is_some_and(|dev| dev.pen_state.tool.is_some());
                 let ok = if let Some(ref mut dev) = guard.pen {
                     match dev.inject_pen(abs_x, abs_y, abs_pressure, tilt_x_deg, tilt_y_deg, action, eraser) {
                         Ok(_) => true,
@@ -1503,7 +1545,10 @@ fn handle_event(
                     // Leaving proximity hides the tablet cursor, so hand the
                     // position to the plain pointer and let an ordinary cursor
                     // stay where the pen last was.
-                    if action == 4 {
+                    let in_proximity = guard.pen.as_ref().is_some_and(|dev| dev.pen_state.tool.is_some());
+                    if (action == 4 && !in_proximity)
+                        || (action == 6 && was_in_proximity && !in_proximity)
+                    {
                         let (px, py) = guard.last_pen_pos;
                         let (px, py) = match guard.pointer_area {
                             Some((ox, oy, ow, oh)) => {
@@ -1521,13 +1566,6 @@ fn handle_event(
                             let _ = dev.emit(EV_ABS, ABS_Y, py.clamp(0, COORD_MAX));
                             let _ = dev.syn();
                         }
-                    }
-                    match action {
-                        0 | 3 => guard.pen_proximity = true,
-                        1 | 4 => guard.pen_proximity = false,
-                        5 => guard.pen_button = true,
-                        6 => guard.pen_button = false,
-                        _ => {}
                     }
                 }
             }
@@ -1660,7 +1698,7 @@ mod tests {
     fn device_over_file(name: &str) -> (UInputDevice, std::path::PathBuf) {
         let path = std::env::temp_dir().join(format!("uscreen-{}-{}", name, std::process::id()));
         let file = OpenOptions::new().create(true).truncate(true).write(true).open(&path).unwrap();
-        (UInputDevice { file }, path)
+        (UInputDevice { file, pen_state: PenState::default() }, path)
     }
 
     #[test]
@@ -1681,6 +1719,137 @@ mod tests {
             "the tool must still be in proximity while the last sample goes out"
         );
         assert_eq!(f[4], vec![(EV_KEY, BTN_TOOL_PEN, 0)], "proximity out in its own frame");
+    }
+
+    #[test]
+    fn held_pen_button_defers_proximity_out_until_button_up() {
+        for eraser in [false, true] {
+            let (mut dev, path) = device_over_file("button-exit");
+            let tool = if eraser { BTN_TOOL_RUBBER } else { BTN_TOOL_PEN };
+            dev.inject_pen(123, 456, 0, 0, 0, 3, eraser).unwrap();
+            dev.inject_pen(0, 0, 0, 0, 0, 5, false).unwrap();
+            dev.inject_pen(0, 0, 0, 0, 0, 4, false).unwrap();
+            dev.inject_pen(0, 0, 0, 0, 0, 4, false).unwrap();
+            assert_eq!(dev.pen_state.tool, Some(tool));
+            assert!(dev.pen_state.exit_pending);
+            let held = frames(&path);
+            assert!(!held.iter().flatten().any(|&(k, c, v)| {
+                k == EV_KEY && matches!(c, BTN_TOOL_PEN | BTN_TOOL_RUBBER) && v == 0
+            }));
+            assert!(!held.iter().flatten().any(|&(k, c, v)| {
+                (k == EV_KEY && c == BTN_TOUCH && v != 0)
+                    || (k == EV_ABS && c == ABS_PRESSURE && v != 0)
+            }));
+            dev.inject_pen(0, 0, 0, 0, 0, 6, false).unwrap();
+            let f = frames(&path);
+            assert_eq!(f[f.len()-2], vec![(EV_KEY, BTN_STYLUS, 0)]);
+            assert_eq!(f.last().unwrap(), &vec![(EV_KEY, tool, 0)]);
+            assert!(dev.pen_state.tool.is_none());
+            assert!(!dev.pen_state.button_down && !dev.pen_state.exit_pending);
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn hover_return_cancels_the_deferred_exit() {
+        let (mut dev, path) = device_over_file("button-return");
+        dev.inject_pen(10, 20, 0, 0, 0, 3, false).unwrap();
+        dev.inject_pen(0, 0, 0, 0, 0, 5, false).unwrap();
+        dev.inject_pen(0, 0, 0, 0, 0, 4, false).unwrap();
+        dev.inject_pen(30, 40, 0, 0, 0, 3, false).unwrap();
+        dev.inject_pen(0, 0, 0, 0, 0, 6, false).unwrap();
+        assert_eq!(dev.pen_state.tool, Some(BTN_TOOL_PEN));
+        assert!(!dev.pen_state.exit_pending);
+        assert!(!frames(&path).iter().flatten().any(|&(k, c, v)| {
+            k == EV_KEY && c == BTN_TOOL_PEN && v == 0
+        }));
+        dev.inject_pen(0, 0, 0, 0, 0, 4, false).unwrap();
+        assert!(frames(&path).last().unwrap().contains(&(EV_KEY, BTN_TOOL_PEN, 0)));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn button_after_hover_exit_uses_only_a_previously_known_position() {
+        let (mut dev, path) = device_over_file("button-outside");
+        dev.inject_pen(123, 456, 0, 0, 0, 3, false).unwrap();
+        dev.inject_pen(0, 0, 0, 0, 0, 4, false).unwrap();
+        let before = frames(&path).len();
+        dev.inject_pen(0, 0, 0, 0, 0, 5, false).unwrap();
+        dev.inject_pen(0, 0, 0, 0, 0, 6, false).unwrap();
+        let f = frames(&path);
+        assert_eq!(&f[before..], &[
+            vec![(EV_KEY, BTN_TOOL_PEN, 1)], vec![(EV_KEY, BTN_STYLUS, 1)],
+            vec![(EV_KEY, BTN_STYLUS, 0)], vec![(EV_KEY, BTN_TOOL_PEN, 0)],
+        ]);
+        let _ = std::fs::remove_file(path);
+
+        let (mut fresh, path) = device_over_file("button-no-position");
+        fresh.inject_pen(0, 0, 0, 0, 0, 5, false).unwrap();
+        fresh.inject_pen(0, 0, 0, 0, 0, 6, false).unwrap();
+        assert_eq!(frames(&path), vec![vec![(EV_KEY, BTN_STYLUS, 1)], vec![(EV_KEY, BTN_STYLUS, 0)]]);
+        assert!(fresh.pen_state.tool.is_none());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn tip_lift_still_releases_contact_while_a_button_is_held() {
+        let (mut dev, path) = device_over_file("button-tip-lift");
+        dev.inject_pen(100, 200, 900, 0, 0, 0, false).unwrap();
+        dev.inject_pen(0, 0, 0, 0, 0, 5, false).unwrap();
+        dev.inject_pen(111, 222, 0, 3, 4, 1, false).unwrap();
+        let f = frames(&path);
+        let up = f.last().unwrap();
+        assert!(up.contains(&(EV_ABS, ABS_X, 111)) && up.contains(&(EV_ABS, ABS_Y, 222)));
+        assert!(up.contains(&(EV_KEY, BTN_TOUCH, 0)) && up.contains(&(EV_ABS, ABS_PRESSURE, 0)));
+        assert!(!up.contains(&(EV_KEY, BTN_TOOL_PEN, 0)));
+        assert!(dev.pen_state.exit_pending);
+        dev.inject_pen(0, 0, 0, 0, 0, 6, false).unwrap();
+        assert!(frames(&path).last().unwrap().contains(&(EV_KEY, BTN_TOOL_PEN, 0)));
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn pen_devices(pen: UInputDevice, pointer: Option<UInputDevice>) -> InjectDevices {
+        InjectDevices { touch: None, pen: Some(pen), pointer,
+            last_pen_pos: (0, 0), pointer_area: None, active_slots: 0 }
+    }
+
+    #[test]
+    fn cleanup_releases_a_deferred_button_once_before_proximity() {
+        let (mut dev, path) = device_over_file("button-cleanup");
+        dev.inject_pen(10, 20, 0, 0, 0, 3, false).unwrap();
+        dev.inject_pen(0, 0, 0, 0, 0, 5, false).unwrap();
+        dev.inject_pen(0, 0, 0, 0, 0, 4, false).unwrap();
+        let mut devices = pen_devices(dev, None);
+        devices.release_all();
+        let f = frames(&path);
+        assert_eq!(f[f.len()-2], vec![(EV_KEY, BTN_STYLUS, 0)]);
+        assert_eq!(f.last().unwrap(), &vec![(EV_KEY, BTN_TOOL_PEN, 0)]);
+        devices.release_all();
+        assert_eq!(f, frames(&path));
+        assert!(devices.pen.as_ref().unwrap().pen_state.last_tool.is_none());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn pointer_handoff_waits_for_the_actual_virtual_proximity_exit() {
+        let (pen, pen_path) = device_over_file("button-handoff-pen");
+        let (pointer, pointer_path) = device_over_file("button-handoff-pointer");
+        let devices = Arc::new(std::sync::Mutex::new(pen_devices(pen, Some(pointer))));
+        let (mode, _) = watch::channel(false);
+        let latency = crate::latency::LatencyTracker::new();
+        for action in [3, 5, 4] {
+            handle_event(InputEvent::Pen { x: 0.5, y: 0.25, pressure: 0.0,
+                tilt_x: 0.0, tilt_y: 0.0, eraser: false, action },
+                &devices, &None, &mode, &latency);
+        }
+        assert!(frames(&pointer_path).is_empty());
+        handle_event(InputEvent::Pen { x: 0.0, y: 0.0, pressure: 0.0,
+            tilt_x: 0.0, tilt_y: 0.0, eraser: false, action: 6 },
+            &devices, &None, &mode, &latency);
+        assert_eq!(frames(&pointer_path), vec![vec![
+            (EV_ABS, ABS_X, COORD_MAX / 2), (EV_ABS, ABS_Y, COORD_MAX / 4)]]);
+        let _ = std::fs::remove_file(pen_path);
+        let _ = std::fs::remove_file(pointer_path);
     }
 
     #[test]
