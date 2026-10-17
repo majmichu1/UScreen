@@ -20,6 +20,7 @@ build: build-helper
 	@echo "✓ Binaries: $(PWD)/target/release/uscreen and uscreen-gui"
 
 install: build edid
+	sudo bash scripts/install-pen-quirk.sh install
 	mkdir -p $(BIN_DIR) $(DATA_DIR)/edid
 	# rm first: cp into a running binary fails with "text file busy"
 	rm -f $(BIN_DIR)/uscreen $(BIN_DIR)/uscreen-gui $(BIN_DIR)/evdi_helper
@@ -41,6 +42,7 @@ install: build edid
 # One-time system setup (needs sudo): pre-create an EVDI device at boot so
 # the daemon never needs root, and load the required modules.
 setup-system:
+	sudo bash scripts/install-pen-quirk.sh install
 	echo "options evdi initial_device_count=1" | sudo tee /etc/modprobe.d/uscreen-evdi.conf
 	printf "evdi\nuinput\n" | sudo tee /etc/modules-load.d/uscreen.conf
 	sudo modprobe evdi || true
@@ -110,9 +112,11 @@ dist-local: build
 	rm -rf dist/uscreen-$(VERSION)
 	mkdir -p dist/uscreen-$(VERSION)/bin dist/uscreen-$(VERSION)/scripts dist/uscreen-$(VERSION)/packaging
 	cp target/release/uscreen target/release/uscreen-gui host/evdi/evdi_helper dist/uscreen-$(VERSION)/bin/
-	cp scripts/install.sh scripts/uscreen.desktop scripts/uscreen.service dist/uscreen-$(VERSION)/scripts/
+	cp scripts/install.sh scripts/install-pen-quirk.sh scripts/uscreen.desktop scripts/uscreen.service dist/uscreen-$(VERSION)/scripts/
 	cp packaging/uscreen-evdi.conf packaging/uscreen-modules.conf packaging/uscreen.service packaging/60-uscreen-uinput.rules dist/uscreen-$(VERSION)/packaging/
 	mkdir -p dist/uscreen-$(VERSION)/packaging/icons && cp packaging/icons/uscreen.svg packaging/icons/uscreen-pen.svg dist/uscreen-$(VERSION)/packaging/icons/
+	mkdir -p dist/uscreen-$(VERSION)/packaging/libinput
+	cp packaging/libinput/99-uscreen-pen.quirks dist/uscreen-$(VERSION)/packaging/libinput/
 	cp README.md dist/uscreen-$(VERSION)/
 	cd android && ./gradlew assembleRelease -q && cp app/build/outputs/apk/release/app-release.apk ../dist/uscreen-$(VERSION)/uscreen.apk 2>/dev/null || true
 	tar -C dist -czf dist/uscreen-$(VERSION)-linux-x86_64.tar.gz uscreen-$(VERSION)

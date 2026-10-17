@@ -39,6 +39,11 @@ systemctl --user enable --now uscreen
 
 The tarball installer does this for you and also adds a menu entry.
 
+All Linux installation methods also install the UScreen Pen libinput quirk
+for light taps. **Log out and back in after installing or updating** so the
+desktop reloads it. There is no file to edit manually; see
+[pen-contact-fix.md](pen-contact-fix.md) for details.
+
 Verify the checksums if you like: `sha256sum -c SHA256SUMS` next to the
 downloaded files.
 
@@ -68,6 +73,9 @@ something is.
 - `/etc/modprobe.d/uscreen-evdi.conf` with `options evdi initial_device_count=2`
 - `/etc/modules-load.d/uscreen.conf` loading `evdi` and `uinput`
 - a udev rule opening `/dev/uinput` to the logged-in user
+- a UScreen Pen libinput quirk in `/usr/share/libinput/99-uscreen-pen.quirks`
+  (packages), or a managed block in `/etc/libinput/local-overrides.quirks`
+  (source/tarball installs; existing user settings are preserved)
 - a systemd *user* unit (never a system service, never root)
 
 See [SECURITY.md](../SECURITY.md) for the reasoning and for a complete

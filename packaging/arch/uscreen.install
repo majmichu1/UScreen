@@ -12,6 +12,7 @@ post_install() {
   # pacman's hicolor hook refreshes the icon cache; the mtime bump is what
   # KDE's own cache keys on.
   touch /usr/share/icons/hicolor 2>/dev/null || true
+  echo "==> Log out and back in to activate the pen contact quirk."
   echo "==> Enable at login with:  systemctl --user enable --now uscreen"
 }
 post_upgrade() { post_install; }

@@ -187,6 +187,7 @@ install_files() {
 
 system_setup() {
     info "System setup (needs sudo): EVDI device at every boot"
+    sudo bash "$SCRIPT_DIR/install-pen-quirk.sh" install
     # Neither directory is guaranteed to exist on a minimal install, and with
     # set -e a missing one used to kill the whole script here, silently, with
     # the binaries already copied and the udev rule not yet installed.

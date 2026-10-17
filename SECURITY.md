@@ -29,6 +29,7 @@ unprivileged user; nothing else is touched.
 | `/etc/modprobe.d/uscreen-evdi.conf` — `options evdi initial_device_count=2` | two EVDI virtual-display devices exist from boot; creating them later needs root |
 | `/etc/modules-load.d/uscreen.conf` — `evdi`, `uinput` | load both modules at boot |
 | `/usr/lib/udev/rules.d/60-uscreen-uinput.rules` (or `/etc/udev/rules.d/`) | opens `/dev/uinput` to the logged-in seat user via `uaccess`, the same mechanism the desktop uses for keyboards |
+| `/usr/share/libinput/99-uscreen-pen.quirks` (packages), or a managed block in `/etc/libinput/local-overrides.quirks` (source/tarball) | recognizes light contacts only for the UScreen virtual pen; other local overrides are preserved |
 | a systemd **user** unit `uscreen.service` | optional autostart with your session; never a system service, never root |
 
 The daemon itself never runs as root and needs no capabilities.
@@ -39,7 +40,8 @@ The daemon itself never runs as root and needs no capabilities.
 systemctl --user disable --now uscreen 2>/dev/null
 # package installs:
 sudo apt remove uscreen      # or: sudo dnf remove uscreen / sudo zypper rm uscreen / sudo pacman -R uscreen
-# script installs:
+# script installs (run the helper from the extracted tarball/source directory):
+sudo bash scripts/install-pen-quirk.sh remove
 rm -f ~/.local/bin/uscreen ~/.local/bin/uscreen-gui ~/.local/bin/evdi_helper ~/.local/bin/libevdi.so.1*
 rm -f ~/.config/systemd/user/uscreen.service ~/.local/share/applications/uscreen.desktop
 # system changes (both kinds of install):
@@ -47,6 +49,11 @@ sudo rm -f /etc/modprobe.d/uscreen-evdi.conf /etc/modules-load.d/uscreen.conf /e
 # your settings and logs:
 rm -rf ~/.config/uscreen ~/.local/share/uscreen
 ```
+
+Package removal also removes the packaged quirk. The script helper removes
+only UScreen's marked block, preserving other local overrides. Any manually
+added UScreen quirk predating this installer is left untouched. Log out and
+back in after removing the quirk.
 
 On the tablet, uninstall the app like any other.
 

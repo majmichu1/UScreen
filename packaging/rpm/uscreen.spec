@@ -35,6 +35,7 @@ install -Dm644 packaging/uscreen.service %{buildroot}%{_userunitdir}/uscreen.ser
 install -Dm644 packaging/uscreen-evdi.conf    %{buildroot}%{_modprobedir}/uscreen-evdi.conf
 install -Dm644 packaging/uscreen-modules.conf %{buildroot}%{_modulesloaddir}/uscreen.conf
 install -Dm644 packaging/60-uscreen-uinput.rules %{buildroot}%{_udevrulesdir}/60-uscreen-uinput.rules
+install -Dm644 packaging/libinput/99-uscreen-pen.quirks %{buildroot}%{_datadir}/libinput/99-uscreen-pen.quirks
 
 %post
 # initial_device_count is only read when evdi loads. Reload it so a device
@@ -52,6 +53,7 @@ command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t 
 modprobe uinput 2>/dev/null || true
 udevadm control --reload 2>/dev/null || true
 udevadm trigger --name-match=uinput 2>/dev/null || true
+echo "uscreen: log out and back in to activate the pen contact quirk."
 
 %files
 %{_bindir}/uscreen
@@ -66,3 +68,4 @@ udevadm trigger --name-match=uinput 2>/dev/null || true
 %{_modprobedir}/uscreen-evdi.conf
 %{_modulesloaddir}/uscreen.conf
 %{_udevrulesdir}/60-uscreen-uinput.rules
+%{_datadir}/libinput/99-uscreen-pen.quirks

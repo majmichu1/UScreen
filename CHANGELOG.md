@@ -5,6 +5,10 @@ Full notes for each version are on the
 
 ## Unreleased
 
+- Light pen taps (reported on Xiaomi Pad 7 with Focus Pen Pro) use a minimum
+  contact pressure and an automatically installed libinput quirk. Log out and
+  back in after installing to activate the quirk
+  ([#34](https://github.com/majmichu1/UScreen/issues/34)).
 - Graphics-tablet mode no longer leaves the same text on an OLED screen for
   hours. The explanation is shown for eight seconds and the screen then goes
   fully black — pen and touch keep working — with a new switch, *Black screen

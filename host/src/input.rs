@@ -510,6 +510,10 @@ impl UInputDevice {
         action: u8,
         eraser: bool,
     ) -> Result<()> {
+        // Android may report contact before pressure rises. Keep contact
+        // distinct from hover/lift; the companion UScreen Pen libinput quirk
+        // sets the contact threshold to one unit.
+        let contact_pressure = pressure.clamp(1, 4096);
         // The active tablet-tool key depends on which end of the pen is in
         // use. An S Pen flipped to its eraser end reports TOOL_TYPE_ERASER.
         let tool = if eraser { BTN_TOOL_RUBBER } else { BTN_TOOL_PEN };
@@ -530,7 +534,7 @@ impl UInputDevice {
                 self.syn()?;
 
                 self.emit(EV_KEY, BTN_TOUCH, 1)?;
-                self.emit(EV_ABS, ABS_PRESSURE, pressure)?;
+                self.emit(EV_ABS, ABS_PRESSURE, contact_pressure)?;
                 self.syn()?;
             }
             1 => {
@@ -556,7 +560,7 @@ impl UInputDevice {
                 // MOVE (pressing)
                 self.emit(EV_ABS, ABS_X, x)?;
                 self.emit(EV_ABS, ABS_Y, y)?;
-                self.emit(EV_ABS, ABS_PRESSURE, pressure)?;
+                self.emit(EV_ABS, ABS_PRESSURE, contact_pressure)?;
                 self.emit(EV_ABS, ABS_TILT_X, tilt_x)?;
                 self.emit(EV_ABS, ABS_TILT_Y, tilt_y)?;
                 self.syn()?;
@@ -1691,5 +1695,31 @@ mod tests {
         let f = frames(&path);
         let _ = std::fs::remove_file(&path);
         assert_eq!(f.last().unwrap(), &vec![(EV_KEY, BTN_TOOL_RUBBER, 0)]);
+    }
+
+    #[test]
+    fn zero_pressure_pen_contact_is_distinct_from_hover_and_lift() {
+        for eraser in [false, true] {
+            let (mut dev, path) = device_over_file("lightcontact");
+            dev.inject_pen(10, 20, 0, 0, 0, 3, eraser).unwrap(); // hover
+            dev.inject_pen(10, 20, 0, 0, 0, 0, eraser).unwrap(); // down, no pressure yet
+            dev.inject_pen(10, 20, 0, 0, 0, 2, eraser).unwrap(); // still touching
+            dev.inject_pen(10, 20, 1, 0, 0, 2, eraser).unwrap();
+            dev.inject_pen(10, 20, 64, 0, 0, 2, eraser).unwrap();
+            dev.inject_pen(10, 20, 4096, 0, 0, 2, eraser).unwrap();
+            dev.inject_pen(10, 20, 0, 0, 0, 2, eraser).unwrap(); // pressure falls, still touching
+            dev.inject_pen(10, 20, 0, 0, 0, 1, eraser).unwrap(); // lift
+            dev.inject_pen(10, 20, 0, 0, 0, 3, eraser).unwrap(); // hover again
+            dev.inject_pen(10, 20, 0, 0, 0, 4, eraser).unwrap(); // leave proximity
+            let f = frames(&path);
+            let _ = std::fs::remove_file(&path);
+            let pressures: Vec<i32> = f.iter().flatten()
+                .filter_map(|&(kind, code, value)| {
+                    (kind == EV_ABS && code == ABS_PRESSURE).then_some(value)
+                }).collect();
+            assert_eq!(pressures, vec![0, 1, 1, 1, 64, 4096, 1, 0, 0, 0]);
+            assert!(f[2].contains(&(EV_KEY, BTN_TOUCH, 1)));
+            assert!(f[8].contains(&(EV_KEY, BTN_TOUCH, 0)));
+        }
     }
 }

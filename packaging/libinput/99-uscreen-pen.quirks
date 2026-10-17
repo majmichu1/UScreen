@@ -1,0 +1,8 @@
+# Companion to the one-unit contact floor in host/src/input.rs.
+# Android already distinguishes contact from hover; do not impose an extra
+# hardware pressure threshold on this virtual tablet.
+[UScreen virtual pen contact]
+MatchName=UScreen Pen*
+MatchVendor=0x4553
+MatchUdevType=tablet
+AttrPressureRange=1:0
