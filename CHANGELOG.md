@@ -5,6 +5,11 @@ Full notes for each version are on the
 
 ## Unreleased
 
+- On GNOME, Cinnamon, COSMIC, Hyprland and plain X11 sessions the daemon no
+  longer looks for KWin or touches the on-screen keyboard setting, and no
+  longer logs "Cannot reach KWin over D-Bus" at start, which read like a
+  fault and was not one ([#41](https://github.com/majmichu1/UScreen/issues/41)).
+  Plasma behaves as before.
 - `uscreen doctor` warns when KDE's compositor is version 6.8.2, which crashes
   the whole desktop when a virtual display is shown
   ([KDE bug 527984](https://bugs.kde.org/show_bug.cgi?id=527984); fixed on the
