@@ -41,6 +41,9 @@ async fn set_mode(mode: &str) -> bool {
 
 /// Turn the on-screen keyboard off, remembering how it was set.
 pub async fn disable() {
+    if !crate::kwin::in_kde_session() {
+        return;
+    }
     let path = state_path();
     // A state file already present means a previous run never restored. Keep
     // that value: it is the user's, whereas the current one is ours.
@@ -68,6 +71,9 @@ pub async fn disable() {
 
 /// Put the on-screen keyboard back the way the user had it.
 pub async fn restore() {
+    if !crate::kwin::in_kde_session() {
+        return;
+    }
     let path = state_path();
     let Ok(saved) = std::fs::read_to_string(&path) else {
         return;

@@ -13,7 +13,7 @@
 //! fallback for systems without it.
 
 use tokio::sync::OnceCell;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const SERVICE: &str = "org.kde.KWin";
 /// Probe target: a property KWin always exposes, so a tool that exists but
@@ -50,10 +50,25 @@ async fn output_of(cmd: &str, args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+pub fn is_kde_session(desktop: &str) -> bool {
+    if desktop.is_empty() {
+        return true;
+    }
+    desktop.split(':').any(|entry| entry.eq_ignore_ascii_case("KDE"))
+}
+
+pub fn in_kde_session() -> bool {
+    is_kde_session(&std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default())
+}
+
 /// Which tool can reach KWin on this machine, decided once per run.
 pub async fn backend() -> Option<Backend> {
     *BACKEND
         .get_or_init(|| async {
+            if !in_kde_session() {
+                debug!("Not a KDE Plasma session — KWin is not looked for");
+                return None;
+            }
             if output_of(
                 "busctl",
                 &["--user", "get-property", SERVICE, PROBE_PATH, PROBE_IFACE, PROBE_PROP],
@@ -161,6 +176,8 @@ pub async fn list_strings(path: &str, iface: &str, prop: &str) -> Option<Vec<Str
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn busctl_string_array_is_split_on_quotes() {
         let raw = r#"as 3 "event7" "event8" "event4""#;
@@ -174,5 +191,17 @@ mod tests {
             let value = raw.split_once(' ').map(|(_, v)| v).unwrap_or(raw).trim();
             assert_eq!(value.trim_matches('"'), want);
         }
+    }
+
+    #[test]
+    fn is_kde_session_reads_the_desktop_list() {
+        assert!(is_kde_session("KDE"));
+        assert!(is_kde_session("kde"));
+        assert!(is_kde_session("GNOME:KDE"));
+        assert!(is_kde_session(""));
+        assert!(!is_kde_session("ubuntu:GNOME"));
+        assert!(!is_kde_session("X-Cinnamon"));
+        assert!(!is_kde_session("COSMIC"));
+        assert!(!is_kde_session("Hyprland"));
     }
 }
