@@ -38,6 +38,15 @@ rest see it as a tablet.
 It extends. There is also a "graphics tablet" mode in which nothing is
 streamed and the pen simply drives your existing screen, like a Wacom Intuos.
 
+**My KDE desktop crashes when the tablet connects.**
+Check the KWin version: `kwin_wayland --version`. KWin 6.8.2 crashes the whole
+desktop when a virtual (EVDI) screen is shown, which is what UScreen's screen
+is to it ([KDE bug 527984](https://bugs.kde.org/show_bug.cgi?id=527984),
+first seen on 6.8.2, 6.8.1 is fine). The fix is on the Plasma 6.8 branch since
+29 October 2026, but the report does not say which release carries it, so
+update KWin once your distribution ships it, or go back to 6.8.1 until then.
+`uscreen doctor` warns when it sees 6.8.2.
+
 **Light pen taps are missed — can I fix that?**
 On some tablets (reported with a Xiaomi Pad 7 and Focus Pen Pro) a very light
 tap arrives with no pressure at all, and libinput, which decides when the tip

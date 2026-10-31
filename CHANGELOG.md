@@ -3,6 +3,16 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
+## Unreleased
+
+- `uscreen doctor` warns when KDE's compositor is version 6.8.2, which crashes
+  the whole desktop when a virtual display is shown
+  ([KDE bug 527984](https://bugs.kde.org/show_bug.cgi?id=527984); fixed on the
+  Plasma 6.8 branch on 29 October 2026, first seen on 6.8.2, 6.8.1 is fine),
+  and [docs/faq.md](docs/faq.md) says what to do about it. Reports of a
+  compositor that crashes the moment the tablet connects, such as
+  [#37](https://github.com/majmichu1/UScreen/issues/37), match it.
+
 ## 1.2.11 — 2026-10-24
 
 - The tablet app no longer overwrites `fps` and `bitrate` in `config.toml` every

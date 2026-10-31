@@ -535,6 +535,13 @@ async fn check_virtual_display(r: &mut Report, cfg: &FileConfig) {
     }
 }
 
+/// `kwin 6.8.2` (the output of `kwin_wayland --version`) as (6, 8, 2).
+fn kwin_version(text: &str) -> Option<(u32, u32, u32)> {
+    let v = text.split_whitespace().last()?;
+    let mut parts = v.split('.').map(|p| p.parse::<u32>().ok());
+    Some((parts.next()??, parts.next()??, parts.next().flatten().unwrap_or(0)))
+}
+
 /// The on-screen keyboard pops up whenever a touchscreen is used, and the
 /// tablet's touch device is exactly that as far as the desktop is concerned.
 /// Reported because it is a global desktop setting, not something the daemon
@@ -590,6 +597,27 @@ async fn check_osk(r: &mut Report) {
                  or a qdbus package (qdbus-qt6 on Debian/Ubuntu, qt6-tools elsewhere).",
             );
             return;
+        }
+    }
+
+    // KWin 6.8.2 crashes the whole desktop when a virtual (EVDI) screen is
+    // shown, which is what UScreen's screen is to it (KDE bug 527984).
+    if let Some(text) = output_of("kwin_wayland", &["--version"]).await {
+        match kwin_version(&text) {
+            Some((6, 8, 2)) => {
+                r.line(
+                    Level::Warn,
+                    "KWin version",
+                    "6.8.2 — crashes with virtual displays (KDE bug 527984)",
+                );
+                r.hint(
+                    "if the desktop crashes when the tablet connects: the fix is on the Plasma 6.8 \
+                     branch (29 Oct 2026) but not in every build yet — update KWin when your \
+                     distribution has it, or go back to 6.8.1",
+                );
+            }
+            Some((a, b, c)) => r.line(Level::Ok, "KWin version", &format!("{}.{}.{}", a, b, c)),
+            None => {}
         }
     }
 
@@ -916,5 +944,19 @@ fn report_transport(r: &mut Report, serial: &str) {
         r.hint("plug the USB cable in for steady latency; the daemon prefers it automatically");
     } else {
         r.line(Level::Ok, "transport", "USB");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_kwin_version_from_its_banner() {
+        assert_eq!(kwin_version("kwin 6.8.2\n"), Some((6, 8, 2)));
+        assert_eq!(kwin_version("kwin 6.7.5"), Some((6, 7, 5)));
+        assert_eq!(kwin_version("kwin 6.8"), Some((6, 8, 0)));
+        assert_eq!(kwin_version(""), None);
+        assert_eq!(kwin_version("kwin"), None);
     }
 }
