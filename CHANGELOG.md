@@ -3,7 +3,7 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
-## Unreleased
+## 1.2.12 — 2026-10-31
 
 - On GNOME, Cinnamon, COSMIC, Hyprland and plain X11 sessions the daemon no
   longer looks for KWin or touches the on-screen keyboard setting, and no
