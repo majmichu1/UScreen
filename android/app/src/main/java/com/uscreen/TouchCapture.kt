@@ -41,8 +41,8 @@ class TouchCapture {
     /// socket; without it the host closes the connection unanswered.
     @Volatile var token: String? = null
 
-    /** Settings to (re)send to the host whenever the control channel connects */
-    @Volatile private var pendingConfig: JSONObject? = null
+    /** Only unsent settings; guarded by this instance's monitor. */
+    private var pendingConfig: JSONObject? = null
     @Volatile private var pendingMode: JSONObject? = null
 
     /** Tablet's native landscape resolution, reported to the host on connect
@@ -71,35 +71,37 @@ class TouchCapture {
 
     private val wsListener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            isConnected = true
-            Log.i(TAG, "Connected")
-            // Authenticate before anything else. If we have no token yet the
-            // host will drop us and relaunch the app with one, and the
-            // reconnect logic takes it from there.
-            token?.let { t ->
-                webSocket.send(JSONObject().apply {
-                    put("type", "auth")
-                    put("token", t)
-                }.toString())
-            } ?: Log.w(TAG, "No session token yet — the host will send one")
-            if (nativeWidth > 0 && nativeHeight > 0) {
-                val res = JSONObject().apply {
-                    put("type", "resolution")
-                    put("width", nativeWidth)
-                    put("height", nativeHeight)
-                    if (nativeWidthMm > 0 && nativeHeightMm > 0) {
-                        put("width_mm", nativeWidthMm)
-                        put("height_mm", nativeHeightMm)
+            synchronized(this@TouchCapture) {
+                isConnected = true
+                Log.i(TAG, "Connected")
+                // Authenticate before anything else. If we have no token yet the
+                // host will drop us and relaunch the app with one, and the
+                // reconnect logic takes it from there.
+                token?.let { t ->
+                    webSocket.send(JSONObject().apply {
+                        put("type", "auth")
+                        put("token", t)
+                    }.toString())
+                } ?: Log.w(TAG, "No session token yet — the host will send one")
+                if (nativeWidth > 0 && nativeHeight > 0) {
+                    val res = JSONObject().apply {
+                        put("type", "resolution")
+                        put("width", nativeWidth)
+                        put("height", nativeHeight)
+                        if (nativeWidthMm > 0 && nativeHeightMm > 0) {
+                            put("width_mm", nativeWidthMm)
+                            put("height_mm", nativeHeightMm)
+                        }
                     }
+                    webSocket.send(res.toString())
+                    Log.i(TAG, "Reported native resolution: ${nativeWidth}x${nativeHeight} " +
+                            "(${nativeWidthMm}x${nativeHeightMm} mm)")
                 }
-                webSocket.send(res.toString())
-                Log.i(TAG, "Reported native resolution: ${nativeWidth}x${nativeHeight} " +
-                        "(${nativeWidthMm}x${nativeHeightMm} mm)")
-            }
-            pendingConfig?.let { webSocket.send(it.toString()) }
-            pendingMode?.let {
-                webSocket.send(it.toString())
-                pendingMode = null
+                sendPendingConfig(webSocket)
+                pendingMode?.let {
+                    webSocket.send(it.toString())
+                    pendingMode = null
+                }
             }
         }
 
@@ -535,9 +537,10 @@ class TouchCapture {
 
     /**
      * Push encoder settings to the host. The host live-restarts ffmpeg with
-     * the new parameters and persists them in its config file. Settings are
-     * also remembered here and re-sent on every reconnect.
+     * the new parameters and persists them in its config file. Offline or
+     * rejected changes wait for a connection; accepted sends are not replayed.
      */
+    @Synchronized
     fun sendConfig(bitrateKbps: Int, fps: Int) {
         val msg = JSONObject().apply {
             put("type", "config")
@@ -546,7 +549,15 @@ class TouchCapture {
         }
         pendingConfig = msg
         if (isConnected) {
-            webSocket?.send(msg.toString())
+            webSocket?.let { sendPendingConfig(it) }
+        }
+    }
+
+    @Synchronized
+    private fun sendPendingConfig(socket: WebSocket) {
+        val msg = pendingConfig ?: return
+        if (socket.send(msg.toString())) {
+            pendingConfig = null
             Log.i(TAG, "Sent config: $msg")
         }
     }
