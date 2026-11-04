@@ -1,3 +1,5 @@
+#[cfg(not(feature = "inproc-encoder"))]
+mod avi;
 mod capture;
 mod config;
 mod cosmic;
@@ -281,7 +283,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         port: input_port,
         instance: 0,
         token: token.clone(),
-        codec: capture::Codec::from_encoder(&encoder).muxer().to_string(),
+        codec: capture::Codec::from_encoder(&encoder).name().to_string(),
         virtual_width: width,
         virtual_height: height,
         pointer_handoff: file_cfg.pointer_handoff,
@@ -514,7 +516,7 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         },
         video_port,
         input_port,
-        codec: capture::Codec::from_encoder(&encoder).muxer().to_string(),
+        codec: capture::Codec::from_encoder(&encoder).name().to_string(),
         token: token.clone(),
         mode_tx: mode_tx.clone(),
         shutdown_rx: shutdown_tx.subscribe(),

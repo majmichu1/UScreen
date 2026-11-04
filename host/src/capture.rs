@@ -47,9 +47,8 @@ impl Codec {
         }
     }
 
-    /// Name for ffmpeg's `-f`, which wants the bitstream format, not the
-    /// encoder.
-    pub fn muxer(self) -> &'static str {
+    /// The name the tablet receives in its greeting.
+    pub fn name(self) -> &'static str {
         match self {
             Codec::H264 => "h264",
             Codec::Hevc => "hevc",
@@ -970,9 +969,12 @@ impl CaptureManager {
             );
         }
 
+        // AVI, because raw Annex B cannot say where a frame ends. See avi.rs.
         encoder_args.extend_from_slice(&[
+            "-flush_packets".into(),
+            "1".into(),
             "-f".into(),
-            codec.muxer().into(),
+            "avi".into(),
             "pipe:1".into(),
         ]);
 
@@ -1405,6 +1407,7 @@ impl CaptureManager {
         let mut total: u64 = 0;
         let mut frames: u64 = 0;
         let mut last_log = Instant::now();
+        let mut avi = crate::avi::AviDemuxer::default();
         let mut packetizer = H264AnnexBPacketizer::new(codec);
         let mut config_extracted = codec_config.lock().ok().and_then(|g| g.clone()).is_some();
 
@@ -1415,18 +1418,16 @@ impl CaptureManager {
                 .context("Read error from encoder")?;
 
             if n == 0 {
-                for data in packetizer.finish() {
-                    if tx.receiver_count() > 0 {
-                        let _ = tx.send(data);
-                    }
-                }
                 return Ok(());
             }
 
             total += n as u64;
 
-            let chunk = &buf[..n];
-            let access_units = packetizer.push(chunk);
+            let access_units: Vec<VideoPacket> = avi
+                .push(&buf[..n])?
+                .iter()
+                .flat_map(|frame| packetizer.push_frame(frame))
+                .collect();
 
             if !config_extracted {
                 if let Some(config) = packetizer.codec_config() {
@@ -1559,6 +1560,14 @@ impl H264AnnexBPacketizer {
     fn push(&mut self, data: &[u8]) -> Vec<VideoPacket> {
         self.buffer.extend_from_slice(data);
         self.process_complete_nals(false)
+    }
+
+    /// Take one whole encoded frame and release it without waiting for the
+    /// next one.
+    fn push_frame(&mut self, frame: &[u8]) -> Vec<VideoPacket> {
+        let mut out = self.push(frame);
+        out.extend(self.finish());
+        out
     }
 
     fn finish(&mut self) -> Vec<VideoPacket> {
@@ -1902,6 +1911,21 @@ mod tests {
         assert_eq!(Codec::from_encoder("libx264"), Codec::H264);
         assert_eq!(Codec::from_encoder("hevc_nvenc"), Codec::Hevc);
         assert_eq!(Codec::from_encoder("hevc_vaapi"), Codec::Hevc);
+    }
+
+    #[test]
+    fn packetizer_releases_each_frame_without_waiting_for_the_next() {
+        let mut packetizer = H264AnnexBPacketizer::new(Codec::H264);
+        let idr = [nal(NAL_TYPE_SPS, &[1]), nal(NAL_TYPE_PPS, &[2]), nal(NAL_TYPE_IDR, &[0x80])].concat();
+
+        let first = packetizer.push_frame(&idr);
+        assert_eq!(first.len(), 1);
+        assert!(first[0].is_idr);
+
+        let second = packetizer.push_frame(&nal(NAL_TYPE_NON_IDR, &[0x80]));
+        assert_eq!(second.len(), 1);
+        assert!(!second[0].is_idr);
+        assert_eq!(second[0].seq, first[0].seq + 1);
     }
 
     #[test]

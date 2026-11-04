@@ -13,7 +13,10 @@
    directory. Only rows the compositor reported as damaged are converted.
 3. **Encode.** `ffmpeg` (or libavcodec in-process) encodes with NVENC, VAAPI or
    libx264 in constant-quality mode, no B-frames, no lookahead, one keyframe
-   per second plus keyframes on demand when a client joins.
+   per second plus keyframes on demand when a client joins. The ffmpeg child
+   writes AVI to its pipe, because each chunk states its size: raw Annex B
+   would hold a frame until a later one arrives, and frames only exist when
+   the screen changes.
 4. **Stream.** A TCP server on loopback sends length-prefixed Annex B access
    units; `adb reverse` carries the port to the tablet over USB. A client that
    falls behind is skipped forward to the newest keyframe rather than fed a
