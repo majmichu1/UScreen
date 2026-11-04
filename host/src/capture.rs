@@ -940,6 +940,11 @@ impl CaptureManager {
                 "-idr_interval".into(),
                 "1".into(),
             ]);
+            // The default of 2 keeps each frame inside the encoder until the
+            // next one arrives. Older ffmpeg has no such queue and no option.
+            if crate::encoders::has_option(&encoder, "async_depth").await {
+                encoder_args.extend_from_slice(&["-async_depth".into(), "1".into()]);
+            }
         } else if encoder == "libx264" {
             let bufsize_k = (bitrate * 2 / fps.max(1)).max(200);
             encoder_args.extend_from_slice(&[
