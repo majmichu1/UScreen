@@ -141,6 +141,10 @@ Everything lives in `~/.config/uscreen/config.toml` and is reachable from
   `hevc_nvenc` is sharper at the same bitrate and was faster on the reference
   tablet. `ten_bit` (HEVC Main10) smooths gradient banding — the desktop is
   8-bit, so it adds precision, not colour; it is not HDR.
+  Before saving, the GUI tests whether the selected encoder can encode a frame.
+  If it cannot, a warning shows the cause and the saved settings and running
+  daemon are left unchanged. The same read-only check is available as
+  `uscreen check-encoder -- h264_vaapi`.
 - **Stream scale** — `stream_scale = 2` sends a quarter of the pixels for a
   ~6 ms lower decode time at the cost of softer text.
 - **VAAPI on a laptop with two GPUs** — the daemon picks the first render node

@@ -106,6 +106,13 @@ enum Commands {
     },
     /// Diagnose the whole setup and report what is wrong
     Doctor,
+    /// Check that an encoder can encode a test frame, without starting the daemon
+    CheckEncoder {
+        encoder: String,
+        /// Render node to check; an explicit empty value selects a device automatically
+        #[arg(long)]
+        vaapi_device: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -123,6 +130,15 @@ async fn main() -> Result<()> {
         Some(Commands::ListDisplays) => list_displays().await?,
         Some(Commands::Wifi { off }) => setup_wifi(*off).await?,
         Some(Commands::Doctor) => doctor::run().await?,
+        Some(Commands::CheckEncoder { encoder, vaapi_device }) => {
+            let encoder = if encoder == "vaapih264enc" { "h264_vaapi" } else { encoder };
+            if encoder.contains("vaapi") {
+                if let Some(device) = vaapi_device {
+                    encoders::ensure_vaapi_device(device).await;
+                }
+            }
+            encoders::probe(encoder).await.map_err(anyhow::Error::msg)?;
+        }
     }
 
     Ok(())
@@ -608,7 +624,7 @@ fn other_daemons() -> Vec<u32> {
         // subcommand means start. Only the other subcommands are not daemons.
         let args: Vec<&[u8]> = cmd.split(|b| *b == 0).skip(1).collect();
         let other_subcommand = args.iter().any(|a| {
-            matches!(*a, b"stop" | b"status" | b"list-displays" | b"doctor" | b"wifi" | b"--help" | b"-h" | b"--version" | b"-V")
+            matches!(*a, b"stop" | b"status" | b"list-displays" | b"doctor" | b"wifi" | b"check-encoder" | b"--help" | b"-h" | b"--version" | b"-V")
         });
         if other_subcommand { continue; }
         // Same user only: another account's daemon is not ours to touch.

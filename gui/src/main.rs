@@ -4,7 +4,7 @@ use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 /// Mirror of the daemon's config file (~/.config/uscreen/config.toml).
@@ -286,11 +286,35 @@ fn stop_daemon() -> Result<(), String> {
     Ok(())
 }
 
+fn check_encoder(encoder: &str, vaapi_device: &str) -> Result<(), String> {
+    let bin = find_uscreen_bin().ok_or("uscreen binary not found — run `make install`")?;
+    let out = Command::new(bin)
+        .args(["check-encoder", "--vaapi-device", vaapi_device, "--", encoder])
+        .output()
+        .map_err(|e| format!("Could not check encoder: {}", e))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let reason = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        Err(if reason.is_empty() { format!("Encoder check failed: {}", out.status) } else { reason })
+    }
+}
+
+struct EncoderCheck {
+    cfg: FileConfig,
+    file_contents: Result<Vec<u8>, std::io::ErrorKind>,
+    restart: bool,
+    stale: bool,
+    result: mpsc::Receiver<Result<(), String>>,
+}
+
 struct App {
     cfg: FileConfig,
     saved_cfg: FileConfig,
     status: Arc<Mutex<Status>>,
     message: String,
+    encoder_check: Option<EncoderCheck>,
+    encoder_error: Option<String>,
     /// Newer release, if the check made when the window opened found one.
     update: Arc<Mutex<Option<String>>>,
 }
@@ -365,16 +389,68 @@ impl App {
             cfg,
             status,
             message: String::new(),
+            encoder_check: None,
+            encoder_error: None,
             update,
         }
     }
 
     fn apply(&mut self, restart: bool) {
+        if self.encoder_check.is_some() {
+            return;
+        }
+        let file_contents = std::fs::read(config_path()).map_err(|e| e.kind());
+        if let Err(kind) = file_contents.as_ref() {
+            if *kind != std::io::ErrorKind::NotFound {
+                self.message = format!("Cannot read settings before checking encoder: {}", kind);
+                return;
+            }
+        }
+        let encoder = self.cfg.encoder.clone();
+        let vaapi_device = self.cfg.vaapi_device.clone();
+        let (tx, result) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(check_encoder(&encoder, &vaapi_device));
+        });
+        self.encoder_check = Some(EncoderCheck {
+            cfg: self.cfg.clone(),
+            file_contents,
+            restart,
+            stale: false,
+            result,
+        });
+        self.encoder_error = None;
+        self.message = "Checking encoder…".into();
+    }
+
+    fn poll_encoder_check(&mut self) {
+        let Some(check) = self.encoder_check.as_mut() else { return };
+        // Remember intermediate edits too, even if the user changes back.
+        check.stale |= self.cfg != check.cfg;
+        let result = match check.result.try_recv() {
+            Ok(result) => result,
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => Err("Encoder check stopped without a result".into()),
+        };
+        let check = self.encoder_check.take().unwrap();
+        let file_contents = std::fs::read(config_path()).map_err(|e| e.kind());
+        if check.stale || file_contents != check.file_contents {
+            self.message = "Settings changed during the encoder check. Apply again.".into();
+            return;
+        }
+        if let Err(reason) = result {
+            self.encoder_error = Some(format!(
+                "Cannot use {}: {}\n\nSettings were not saved. The running daemon was left unchanged.",
+                check.cfg.encoder, reason
+            ));
+            self.message = "Encoder check failed — settings were not saved".into();
+            return;
+        }
         match self.cfg.save() {
             Ok(_) => {
                 self.saved_cfg = self.cfg.clone();
                 self.message = "Settings saved".into();
-                if restart {
+                if check.restart {
                     let _ = stop_daemon();
                     std::thread::sleep(Duration::from_millis(500));
                     match start_daemon() {
@@ -534,6 +610,7 @@ impl eframe::App for App {
 
             // ----- Start / Stop -----
             ui.horizontal(|ui| {
+                if self.encoder_check.is_some() { ui.disable(); }
                 let big = egui::vec2(ui.available_width(), 34.0);
                 if status.daemon_running {
                     if ui
@@ -813,7 +890,8 @@ impl eframe::App for App {
                         );
                         let mut auto = status.autostart;
                         if ui
-                            .checkbox(&mut auto, "Start UScreen with the desktop")
+                            .add_enabled(self.encoder_check.is_none(),
+                                egui::Checkbox::new(&mut auto, "Start UScreen with the desktop"))
                             .changed()
                         {
                             match set_autostart(auto) {
@@ -841,7 +919,7 @@ impl eframe::App for App {
                     "Save"
                 };
                 if ui
-                    .add_enabled(dirty, egui::Button::new(label))
+                    .add_enabled(dirty && self.encoder_check.is_none(), egui::Button::new(label))
                     .clicked()
                 {
                     self.apply(status.daemon_running);
@@ -867,6 +945,18 @@ impl eframe::App for App {
             );
             });
         });
+        self.poll_encoder_check();
+        if let Some(error) = self.encoder_error.clone() {
+            egui::Window::new("Encoder unavailable")
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.colored_label(ui.visuals().warn_fg_color, error);
+                    if ui.button("OK").clicked() {
+                        self.encoder_error = None;
+                    }
+                });
+        }
     }
 }
 
@@ -890,4 +980,209 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn isolated(name: &str, script: &str) -> bool {
+        if std::env::var("USCREEN_ENCODER_TEST_CASE").as_deref() == Ok(name) {
+            return true;
+        }
+        let root = std::env::temp_dir().join(format!("uscreen-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(root.join(".local/bin")).unwrap();
+        if !script.is_empty() {
+            let bin = root.join(".local/bin/uscreen");
+            std::fs::write(&bin, script).unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let result = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &format!("tests::{name}"), "--nocapture"])
+            .env("HOME", &root)
+            .env("PATH", &root)
+            .env("USCREEN_ENCODER_TEST_CASE", name)
+            .status().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(result.success());
+        false
+    }
+
+    fn app_with_encoder(encoder: &str) -> App {
+        let saved = FileConfig { encoder: "libx264".into(), ..FileConfig::default() };
+        saved.save().unwrap();
+        App {
+            cfg: FileConfig { encoder: encoder.into(), ..saved.clone() },
+            saved_cfg: saved,
+            status: Arc::new(Mutex::new(Status::default())),
+            message: String::new(),
+            encoder_check: None,
+            encoder_error: None,
+            update: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn wait_for_check(app: &mut App) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while app.encoder_check.is_some() {
+            app.poll_encoder_check();
+            assert!(std::time::Instant::now() < deadline, "Encoder check did not finish");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn unavailable_encoder_preserves_saved_settings() {
+        // Keep HOME and the host executable isolated from the user's daemon.
+        if std::env::var_os("USCREEN_ENCODER_TEST_CHILD").is_none() {
+            let root = std::env::temp_dir().join(format!("uscreen-encoder-test-{}", std::process::id()));
+            std::fs::create_dir_all(root.join(".local/bin")).unwrap();
+            let bin = root.join(".local/bin/uscreen");
+            std::fs::write(&bin, "#!/bin/sh\necho 'Cannot load libcuda.so.1' >&2\nexit 1\n").unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let result = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "tests::unavailable_encoder_preserves_saved_settings", "--nocapture"])
+                .env("HOME", &root)
+                .env("USCREEN_ENCODER_TEST_CHILD", "1")
+                .status().unwrap();
+            std::fs::remove_dir_all(root).unwrap();
+            assert!(result.success());
+            return;
+        }
+
+        let saved = FileConfig { encoder: "libx264".into(), ..FileConfig::default() };
+        saved.save().unwrap();
+        let original = std::fs::read(config_path()).unwrap();
+        let mut app = App {
+            cfg: FileConfig { encoder: "h264_nvenc".into(), ..saved.clone() },
+            saved_cfg: saved.clone(),
+            status: Arc::new(Mutex::new(Status::default())),
+            message: String::new(),
+            encoder_check: None,
+            encoder_error: None,
+            update: Arc::new(Mutex::new(None)),
+        };
+        app.apply(false);
+        assert_eq!(std::fs::read(config_path()).unwrap(), original,
+            "An unchecked encoder must not replace the saved config");
+        assert_eq!(app.saved_cfg, saved);
+    }
+
+    #[test]
+    fn failed_check_warns_without_restarting() {
+        if !isolated("failed_check_warns_without_restarting", "#!/bin/sh\nif [ \"$1\" = check-encoder ]; then\n echo 'Cannot load libcuda.so.1' >&2\n exit 1\nfi\necho \"$1\" >> \"$HOME/daemon-actions\"\n") { return; }
+        let mut app = app_with_encoder("h264_nvenc");
+        let original = std::fs::read(config_path()).unwrap();
+        app.apply(true);
+        wait_for_check(&mut app);
+        let warning = app.encoder_error.as_deref().expect("A visible warning is required");
+        assert!(warning.contains("h264_nvenc") && warning.contains("Cannot load libcuda.so.1"));
+        assert_eq!(std::fs::read(config_path()).unwrap(), original);
+        assert_eq!(app.saved_cfg.encoder, "libx264");
+        assert!(!PathBuf::from(home()).join("daemon-actions").exists());
+    }
+
+    #[test]
+    fn successful_check_saves_the_selection() {
+        if !isolated("successful_check_saves_the_selection", "#!/bin/sh\nexit 0\n") { return; }
+        let mut app = app_with_encoder("h264_nvenc");
+        app.apply(false);
+        wait_for_check(&mut app);
+        assert_eq!(FileConfig::load().encoder, "h264_nvenc");
+        assert_eq!(app.saved_cfg, app.cfg);
+        assert!(app.encoder_error.is_none());
+    }
+
+    #[test]
+    fn edits_during_slow_check_discard_the_result() {
+        if !isolated("edits_during_slow_check_discard_the_result", "#!/bin/sh\n/usr/bin/sleep 1\nexit 0\n") { return; }
+        let mut app = app_with_encoder("h264_nvenc");
+        let original = std::fs::read(config_path()).unwrap();
+        let started = std::time::Instant::now();
+        app.apply(false);
+        assert!(started.elapsed() < Duration::from_millis(500), "Checking must not block the GUI thread");
+        app.cfg.bitrate = 30_000;
+        app.poll_encoder_check();
+        app.cfg.bitrate = 20_000;
+        wait_for_check(&mut app);
+        assert_eq!(std::fs::read(config_path()).unwrap(), original);
+        assert_eq!(app.saved_cfg.encoder, "libx264");
+        assert!(app.message.contains("Apply again"));
+    }
+
+    #[test]
+    fn missing_host_warns_without_saving() {
+        if !isolated("missing_host_warns_without_saving", "") { return; }
+        let mut app = app_with_encoder("h264_nvenc");
+        app.apply(false);
+        wait_for_check(&mut app);
+        assert!(app.encoder_error.as_deref().unwrap().contains("uscreen binary not found"));
+        assert_eq!(FileConfig::load().encoder, "libx264");
+    }
+
+    #[test]
+    fn review_probe_passes_the_exact_gui_device() {
+        if !isolated("review_probe_passes_the_exact_gui_device", "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/probe-args\"\nexit 1\n") { return; }
+        let mut app = app_with_encoder("h264_vaapi");
+        let mut disk = FileConfig::load();
+        disk.vaapi_device = "/dev/dri/renderD129".into();
+        disk.save().unwrap();
+        let original = std::fs::read(config_path()).unwrap();
+        for device in ["/dev/dri/renderD128", ""] {
+            app.cfg.vaapi_device = device.into();
+            app.apply(false);
+            wait_for_check(&mut app);
+            assert_eq!(std::fs::read_to_string(PathBuf::from(home()).join("probe-args")).unwrap(),
+                format!("check-encoder\n--vaapi-device\n{device}\n--\nh264_vaapi\n"));
+            assert_eq!(std::fs::read(config_path()).unwrap(), original);
+        }
+    }
+
+    #[test]
+    fn review_concurrent_disk_updates_are_preserved() {
+        if !isolated("review_concurrent_disk_updates_are_preserved", "#!/bin/sh\n/usr/bin/sleep 1\nexit 0\n") { return; }
+        let mut app = app_with_encoder("h264_vaapi");
+        app.cfg.vaapi_device = "/dev/dri/renderD128".into();
+        app.apply(false);
+        let mut external = FileConfig::load();
+        external.vaapi_device = "/dev/dri/renderD129".into();
+        external.save().unwrap();
+        let original = std::fs::read(config_path()).unwrap();
+        wait_for_check(&mut app);
+        assert_eq!(std::fs::read(config_path()).unwrap(), original,
+            "An asynchronous check must not overwrite a configuration written during its probe");
+        assert_eq!(app.saved_cfg.vaapi_device, "");
+        assert!(app.message.contains("Apply again"));
+    }
+
+    #[test]
+    fn review_autostart_is_disabled_during_a_probe() {
+        if !isolated("review_autostart_is_disabled_during_a_probe", "") { return; }
+        let mut app = app_with_encoder("libx264");
+        app.status.lock().unwrap().autostart = true;
+        let (_tx, result) = mpsc::channel();
+        app.encoder_check = Some(EncoderCheck {
+            cfg: app.cfg.clone(),
+            file_contents: std::fs::read(config_path()).map_err(|e| e.kind()),
+            restart: true, stale: false, result,
+        });
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut frame = eframe::Frame::_new_kittest();
+        for checking in [true, false] {
+            if !checking { app.encoder_check = None; }
+            let output = ctx.run(egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 3000.0))),
+                ..Default::default()
+            }, |ctx| eframe::App::update(&mut app, ctx, &mut frame));
+            let tree = output.platform_output.accesskit_update.unwrap();
+            let checkbox = tree.nodes.iter().map(|(_, node)| node)
+                .find(|node| node.label() == Some("Start UScreen with the desktop"))
+                .expect("Autostart checkbox must be present in the rendered UI");
+            assert_eq!(checkbox.is_disabled(), checking,
+                "Autostart must not stop the daemon underneath an in-flight Apply & restart");
+        }
+    }
 }
