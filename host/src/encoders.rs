@@ -34,10 +34,10 @@ fn order_nodes(mut found: Vec<(u32, String)>) -> Vec<String> {
     found.into_iter().map(|(n, _)| format!("/dev/dri/renderD{}", n)).collect()
 }
 
-fn render_nodes() -> Vec<String> {
+/// `(number, driver)` of every render node on the machine.
+fn render_drivers() -> Vec<(u32, String)> {
     let Ok(dir) = std::fs::read_dir("/sys/class/drm") else { return Vec::new() };
-    let found = dir
-        .flatten()
+    dir.flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
             let num = name.strip_prefix("renderD")?.parse::<u32>().ok()?;
@@ -47,8 +47,22 @@ fn render_nodes() -> Vec<String> {
                 .unwrap_or_default();
             Some((num, driver))
         })
-        .collect();
-    order_nodes(found)
+        .collect()
+}
+
+fn render_nodes() -> Vec<String> {
+    order_nodes(render_drivers())
+}
+
+fn has_nvidia(found: &[(u32, String)]) -> bool {
+    found.iter().any(|(_, driver)| driver == "nvidia")
+}
+
+/// Whether an NVIDIA GPU with its proprietary driver is in the machine. With
+/// VAAPI that usually means encoding happens on a different GPU from the one
+/// drawing the desktop.
+pub fn nvidia_gpu_present() -> bool {
+    has_nvidia(&render_drivers())
 }
 
 /// Settle which render node VAAPI uses, once per run: `configured` when it is
@@ -222,6 +236,14 @@ pub async fn resolve(configured: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn spots_an_nvidia_render_node() {
+        let intel_and_nvidia = vec![(128, "i915".to_string()), (129, "nvidia".to_string())];
+        assert!(has_nvidia(&intel_and_nvidia));
+        assert!(!has_nvidia(&[(128, "amdgpu".to_string())]));
+        assert!(!has_nvidia(&[]));
+    }
+
     use super::*;
 
     #[test]

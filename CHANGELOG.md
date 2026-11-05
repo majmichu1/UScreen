@@ -11,6 +11,13 @@ Full notes for each version are on the
   tablet, as often as it liked. It could not see anything: the connection was
   dropped after three seconds, as before.
 
+- `uscreen doctor` points out that an NVIDIA GPU is also in the machine when
+  the encoder is VAAPI. Measured on a laptop with an Intel iGPU and an NVIDIA
+  GPU drawing the desktop: with VAAPI, steady motion at full size made frames
+  queue up in front of the encoder after 20-30 seconds, while NVENC did not.
+  The hint says to try `h264_nvenc` or `stream_scale = 2`
+  ([#41](https://github.com/majmichu1/UScreen/issues/41)).
+
 ## 1.2.13 — 2026-11-04
 
 - Less delay on the tablet, most of all when little on the screen is moving.

@@ -189,6 +189,13 @@ async fn check_tools(r: &mut Report, cfg: &FileConfig) {
             );
             if cfg.encoder.contains("vaapi") {
                 r.line(Level::Ok, "VAAPI device", &crate::encoders::vaapi_device());
+                if crate::encoders::nvidia_gpu_present() {
+                    r.hint(
+                        "an NVIDIA GPU is also in this machine. With VAAPI on the other GPU, steady \
+                         motion at full size can make frames queue up in front of the encoder. If it \
+                         feels laggy, try encoder = \"h264_nvenc\", or stream_scale = 2",
+                    );
+                }
             }
         }
     }
