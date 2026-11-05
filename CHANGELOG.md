@@ -10,7 +10,6 @@ Full notes for each version are on the
   make the encoder send a keyframe, and so a burst of bitrate to the real
   tablet, as often as it liked. It could not see anything: the connection was
   dropped after three seconds, as before.
-
 - `uscreen doctor` points out that an NVIDIA GPU is also in the machine when
   the encoder is VAAPI. Measured on a laptop with an Intel iGPU and an NVIDIA
   GPU drawing the desktop: with VAAPI, steady motion at full size made frames
