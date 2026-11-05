@@ -5,6 +5,12 @@ Full notes for each version are on the
 
 ## Unreleased
 
+- Touchpad mode ([#40](https://github.com/majmichu1/UScreen/issues/40)): a switch
+  in the tablet's settings makes fingers move the computer's pointer like a
+  laptop touchpad. Tap clicks, tap and drag drags, two fingers scroll, a
+  two-finger tap right-clicks, three fingers middle-click. The pen is not
+  affected. The computer gets a plain mouse device ("UScreen Touchpad"), made
+  the first time it is used. Not yet tried on a real tablet.
 - The video port no longer asks for a keyframe before the client has shown the
   session token. Any local process can open that port, and until now it could
   make the encoder send a keyframe, and so a burst of bitrate to the real
