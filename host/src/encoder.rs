@@ -101,6 +101,7 @@ impl Encoder {
         } else if name.contains("vaapi") {
             opts.set("rc_mode", "CQP");
             opts.set("qp", &quality.to_string());
+            opts.set("async_depth", "1");
         } else {
             opts.set("preset", "ultrafast");
             opts.set("tune", "zerolatency");

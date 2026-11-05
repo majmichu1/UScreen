@@ -3,6 +3,14 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
+## Unreleased
+
+- Less delay on the tablet, most of all when little on the screen is moving.
+  Each frame used to wait for two later frames before it left the computer,
+  and for a third with VAAPI (Intel and AMD). Frames only exist when the
+  screen changes, so on a quiet desktop one small change could take about
+  600 ms to appear. Frames now leave as soon as they are encoded.
+
 ## 1.2.12 — 2026-10-31
 
 - On GNOME, Cinnamon, COSMIC, Hyprland and plain X11 sessions the daemon no

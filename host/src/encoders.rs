@@ -152,6 +152,28 @@ async fn probe_with(encoder: &str, vaapi_device_override: Option<&str>) -> Resul
     }
 }
 
+/// Whether this ffmpeg's `encoder` accepts `-option`. Options come and go
+/// between ffmpeg versions, and an unknown one stops the encoder from starting.
+pub async fn has_option(encoder: &str, option: &str) -> bool {
+    let help = tokio::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-h", &format!("encoder={}", encoder)])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .await;
+    match help {
+        Ok(out) => help_lists_option(&String::from_utf8_lossy(&out.stdout), option),
+        Err(e) => {
+            warn!("Could not ask ffmpeg about {}: {}", encoder, e);
+            false
+        }
+    }
+}
+
+fn help_lists_option(help: &str, option: &str) -> bool {
+    let flag = format!("-{}", option);
+    help.lines().any(|line| line.split_whitespace().next() == Some(flag.as_str()))
+}
+
 pub async fn works(encoder: &str) -> bool {
     probe(encoder).await.is_ok()
 }
@@ -211,6 +233,15 @@ mod tests {
         ];
         assert_eq!(order_nodes(found), ["/dev/dri/renderD129", "/dev/dri/renderD130"]);
         assert!(order_nodes(vec![(128, "nvidia".into())]).is_empty());
+    }
+
+    #[test]
+    fn finds_an_option_only_where_ffmpeg_lists_it() {
+        let help = "h264_vaapi AVOptions:\n  -async_depth  <int>  E..V... Maximum processing parallelism\n  -low_power  <boolean>  uses async_depth internally\n";
+        assert!(help_lists_option(help, "async_depth"));
+        assert!(help_lists_option(help, "low_power"));
+        assert!(!help_lists_option(help, "async"));
+        assert!(!help_lists_option("h264_vaapi AVOptions:\n", "async_depth"));
     }
 
     #[test]
