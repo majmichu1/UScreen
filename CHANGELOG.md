@@ -5,6 +5,11 @@ Full notes for each version are on the
 
 ## Unreleased
 
+- The capture helper no longer grabs pixels or re-requests an update while the
+  screen is still. On an idle desktop that produced a stream of EVDI kernel
+  warnings ("Update ready not sent, but pixels are grabbed", "Update was already
+  requested", [#41](https://github.com/majmichu1/UScreen/issues/41)): 344 a
+  minute here, none after. Frames after a still period arrive as before.
 - The video port no longer asks for a keyframe before the client has shown the
   session token. Any local process can open that port, and until now it could
   make the encoder send a keyframe, and so a burst of bitrate to the real

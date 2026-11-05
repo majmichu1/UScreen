@@ -925,18 +925,17 @@ static void run_event_loop(evdi_handle handle) {
         if (!g_have_mode) {
             timeout_ms = 100;
         } else if (g_update_pending) {
-            /* Waiting for update_ready. The capture deadline below has already
-               passed and cannot advance until the request completes, so
-               deriving a timeout from it yields 0 forever and poll returns
-               instantly — the loop then burns a whole core. This is not a
-               rare state: disabling the virtual output leaves a mode set with
-               nothing rendering to it, which is exactly what happens when the
-               tablet is unplugged or switched to pen-only.
-               Sleep until the watchdog is due instead. update_ready wakes poll
-               the moment it arrives, so nothing is delayed when the
-               compositor is actually running. */
-            long long left = g_last_request_ms + 250 - now_ms();
-            timeout_ms = left < 0 ? 0 : (left > 250 ? 250 : (int)left);
+            /* Waiting for update_ready. The capture deadline below has
+               already passed and cannot advance until the request
+               completes, so deriving a timeout from it yields 0 forever and
+               poll returns instantly — the loop then burns a whole core.
+               This is not a rare state: a still desktop, or a disabled
+               virtual output (the tablet unplugged or switched to
+               pen-only), leaves a request pending for as long as it lasts.
+               update_ready wakes poll the moment it arrives, so a fixed
+               sleep delays nothing; it only bounds how often the loop does
+               its housekeeping (statistics, the fallback grab). */
+            timeout_ms = 1000;
         } else {
             long long due = g_last_request_ms + request_period_ms;
             timeout_ms = (int)(due - now_ms());
@@ -975,12 +974,14 @@ static void run_event_loop(evdi_handle handle) {
             }
         }
 
-        /* Watchdog: if a request got lost (compositor hiccup), don't stay
-           stuck waiting for update_ready forever. */
-        if (g_update_pending && (now - g_last_request_ms) > 250) {
-            g_update_pending = 0;
-            grab_now();
-        }
+        /* No watchdog on a pending request. The driver keeps the request
+           flagged until it sends update_ready, and says nothing while the
+           screen does not change, so a long wait is a still desktop, not a
+           lost request. Grabbing anyway pulled pixels without an update_ready
+           and the re-request after it was ignored as "already requested":
+           both show up as kernel warnings, several a second on an idle
+           desktop (#41). The writer thread keeps the stream alive on its own
+           while nothing is grabbed. */
 
         /* Fallback grab once a second in case no events flow at all */
         if ((now - last_fallback_grab_ms) >= 1000) {
