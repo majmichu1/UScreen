@@ -11,7 +11,7 @@ and must be updated together — the session token between them needs both.
 | `uscreen_<ver>_amd64.deb` | Debian 12+, Ubuntu 22.04+, Mint, Pop | `sudo apt install ./uscreen_*.deb` — pulls `evdi-dkms`, `ffmpeg` and `adb` |
 | `uscreen-<ver>-1.x86_64.rpm` | openSUSE | `sudo zypper install ./uscreen-*.rpm` |
 | `uscreen-<ver>-1.x86_64.rpm` | Fedora | enable [RPM Fusion](https://rpmfusion.org/Configuration) first (stock Fedora has no `ffmpeg`), then `sudo dnf install --allowerasing ./uscreen-*.rpm`, then build the evdi module from [DisplayLink/evdi](https://github.com/DisplayLink/evdi) — it is not packaged for Fedora |
-| `uscreen-<ver>-PKGBUILD.tar.gz` | Arch, Manjaro, EndeavourOS, CachyOS | extract, `makepkg -si` — pulls `evdi-dkms` from the AUR |
+| `uscreen-<ver>-PKGBUILD.tar.gz` | Arch, Manjaro, EndeavourOS, CachyOS | `mkdir uscreen && tar xf uscreen-*-PKGBUILD.tar.gz -C uscreen && cd uscreen && makepkg -si` (run `makepkg` inside the folder with the `PKGBUILD`, not on the archive) — pulls `evdi-dkms` from the AUR |
 | `uscreen-<ver>-linux-x86_64.tar.gz` | anything else, or Bazzite/Nobara | extract, `./scripts/install.sh` |
 
 Bazzite and Nobara ship the evdi module in the image; the tarball's installer

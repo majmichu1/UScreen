@@ -49,7 +49,7 @@ Ubuntu/Debian, Arch Linux and openSUSE.
 | --- | --- |
 | `uscreen_<ver>_amd64.deb` | Debian 12+, Ubuntu 22.04+, Mint, Pop — `sudo apt install ./uscreen_*.deb` |
 | `uscreen-<ver>-1.x86_64.rpm` | openSUSE (`zypper install`), Fedora (RPM Fusion first, then `dnf install --allowerasing`) |
-| `uscreen-<ver>-PKGBUILD.tar.gz` | Arch and derivatives — extract, `makepkg -si` |
+| `uscreen-<ver>-PKGBUILD.tar.gz` | Arch and derivatives — `mkdir uscreen && tar xf uscreen-*-PKGBUILD.tar.gz -C uscreen && cd uscreen && makepkg -si` |
 | `uscreen-<ver>-linux-x86_64.tar.gz` | Bazzite, Nobara, anything else — extract, `./scripts/install.sh` |
 
 Then `systemctl --user enable --now uscreen` (the tarball installer does this

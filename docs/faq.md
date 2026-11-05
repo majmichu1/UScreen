@@ -39,13 +39,19 @@ It extends. There is also a "graphics tablet" mode in which nothing is
 streamed and the pen simply drives your existing screen, like a Wacom Intuos.
 
 **My KDE desktop crashes when the tablet connects.**
-Check the KWin version: `kwin_wayland --version`. KWin 6.8.2 crashes the whole
-desktop when a virtual (EVDI) screen is shown, which is what UScreen's screen
-is to it ([KDE bug 527984](https://bugs.kde.org/show_bug.cgi?id=527984),
-first seen on 6.8.2, 6.8.1 is fine). The fix is on the Plasma 6.8 branch since
-29 October 2026, but the report does not say which release carries it, so
-update KWin once your distribution ships it, or go back to 6.8.1 until then.
-`uscreen doctor` warns when it sees 6.8.2.
+Check the KWin version: `kwin_wayland --version`. Unpatched KWin 6.8.2 crashes
+the whole desktop when a virtual (EVDI) screen is shown, which is what
+UScreen's screen is to it ([KDE bug 527984](https://bugs.kde.org/show_bug.cgi?id=527984),
+first seen on 6.8.2, 6.8.1 is fine). Distributions have started shipping a
+patched 6.8.2 (Arch's `6.8.2-2` has the fix), so update your packages; if
+there is no patched build for you yet, go back to 6.8.1. The version number
+alone cannot tell the two apart, so `uscreen doctor` warns on any 6.8.2.
+
+**The tablet's resolution goes back to the tablet's own after I change it.**
+By default UScreen follows the tablet: every time it connects it reports its
+screen size and the virtual display is switched to match
+(`auto_resolution = true`). To keep your own `width` and `height`, set
+`auto_resolution = false` in `~/.config/uscreen/config.toml`.
 
 **Light pen taps are missed — can I fix that?**
 On some tablets (reported with a Xiaomi Pad 7 and Focus Pen Pro) a very light
