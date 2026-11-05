@@ -23,6 +23,7 @@ please add yours.
 | Linux Mint 22.3 | Cinnamon (X11) | Intel Lunar Lake | touch lands on the tablet's screen; the pen jumps to the computer screen for an instant when it enters and leaves, under investigation | [issue #24](https://github.com/majmichu1/UScreen/issues/24) |
 | Arch Linux (kernel 7.2) | KDE Plasma 6.7.5, Wayland | Intel UHD (i5-10210U), `h264_vaapi` | works on a Fire 7 (9th gen); smooth, some latency | [issue #27](https://github.com/majmichu1/UScreen/issues/27) |
 | Ubuntu 26.04.1 LTS | GNOME, Wayland | Intel UHD 620, `libx264` | works with a Galaxy Tab A9+ (1.2.7 and 1.2.8, `.deb`); touch is mapped to the tablet automatically, the pen was not tried | [issue #28](https://github.com/majmichu1/UScreen/issues/28) |
+| Fedora 44 | Cinnamon | Intel i5-1245U, `libx264` and `h264_vaapi` | works with a Lenovo Tab4 8 Plus (1.2.12, `.rpm`) | [issue #46](https://github.com/majmichu1/UScreen/issues/46) |
 
 Requirements that follow from the design:
 
@@ -72,6 +73,7 @@ Requirements that follow from the design:
 | Samsung Galaxy S26 Ultra (phone) | 16 | — | works on Mint Cinnamon | [issue #24](https://github.com/majmichu1/UScreen/issues/24) |
 | Amazon Fire 7 (9th gen) | Fire OS 7 (Android 9) | — | works over micro USB at 60 fps / 20 Mbps; MediaTek MT8163 decoder | [issue #27](https://github.com/majmichu1/UScreen/issues/27) |
 | Samsung Galaxy Tab A9+ | 16 | — | works on Ubuntu 26.04 GNOME | [issue #28](https://github.com/majmichu1/UScreen/issues/28) |
+| Lenovo Tab4 8 Plus (TB-8704F) | 11 | — | works on Fedora 44 Cinnamon | [issue #46](https://github.com/majmichu1/UScreen/issues/46) |
 
 Any Android 8.1+ device with a hardware H.264 decoder should work — the app
 reports its own panel size and the virtual display is generated to match.
