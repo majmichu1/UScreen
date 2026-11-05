@@ -126,6 +126,7 @@ extended display, pressure but no tilt.
 
 Everything lives in `~/.config/uscreen/config.toml` and is reachable from
 `uscreen-gui`, the ⚙ sheet in the tablet app, the tray icon, or CLI flags.
+Every key, with its default and range, is in [docs/configuration.md](docs/configuration.md).
 
 The tablet sends bitrate and frame-rate changes when you press **Apply**.
 An offline change waits until it can be sent; a change already accepted by
@@ -205,7 +206,7 @@ More in [docs/faq.md](docs/faq.md).
 
 - [Installation](docs/installation.md) · [Troubleshooting](docs/troubleshooting.md)
 - [Architecture and protocol](docs/architecture.md) · [Development, building, releasing](docs/development.md)
-- [Benchmarks](docs/benchmarks.md) · [Compatibility](docs/compatibility.md) · [FAQ](docs/faq.md)
+- [Configuration](docs/configuration.md) · [Benchmarks](docs/benchmarks.md) · [Compatibility](docs/compatibility.md) · [FAQ](docs/faq.md)
 - [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 ## Releases
