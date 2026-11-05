@@ -61,6 +61,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("touch_enabled", true)
         set(v) = sp.edit().putBoolean("touch_enabled", v).apply()
 
+    /** Fingers act as a laptop touchpad for the computer's pointer. */
+    var touchpadMode: Boolean
+        get() = sp.getBoolean("touchpad_mode", false)
+        set(v) = sp.edit().putBoolean("touchpad_mode", v).apply()
+
     /**
      * Which way round the tablet is held: [ORIENTATION_AUTO] follows the
      * sensor between the two landscape directions, the other two pin it.

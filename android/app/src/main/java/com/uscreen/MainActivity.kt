@@ -55,7 +55,10 @@ class MainActivity : ComponentActivity() {
         prefs = Prefs(this)
         applyOrientation()
         videoReceiver = VideoReceiver()
-        touchCapture = TouchCapture().also { it.setTouchEnabled(prefs.touchEnabled) }
+        touchCapture = TouchCapture().also {
+            it.setTouchEnabled(prefs.touchEnabled)
+            it.setTouchpadMode(prefs.touchpadMode)
+        }
         applyToken(intent, restart = false)
 
         // Close the host's latency measurement loop: every acknowledged frame
@@ -414,6 +417,7 @@ fun UScreenMain(
     var showSettings by remember { mutableStateOf(false) }
     var showStats by remember { mutableStateOf(prefs?.showStats ?: false) }
     var touchOn by remember { mutableStateOf(prefs?.touchEnabled ?: true) }
+    var touchpadOn by remember { mutableStateOf(prefs?.touchpadMode ?: false) }
     var blankInPenMode by remember { mutableStateOf(prefs?.blankPenOnly ?: true) }
     var orientationChoice by remember { mutableStateOf(prefs?.orientation ?: Prefs.ORIENTATION_AUTO) }
 
@@ -621,6 +625,12 @@ fun UScreenMain(
                     prefs?.blankPenOnly = it
                 },
                 touchEnabled = touchOn,
+                touchpadMode = touchpadOn,
+                onTouchpadModeChange = {
+                    touchpadOn = it
+                    prefs?.touchpadMode = it
+                    touchCapture?.setTouchpadMode(it)
+                },
                 onTouchEnabledChange = {
                     touchOn = it
                     prefs?.touchEnabled = it
@@ -771,6 +781,8 @@ private fun SettingsSheet(
     blankPenOnly: Boolean,
     onBlankPenOnlyChange: (Boolean) -> Unit,
     touchEnabled: Boolean,
+    touchpadMode: Boolean,
+    onTouchpadModeChange: (Boolean) -> Unit,
     onTouchEnabledChange: (Boolean) -> Unit,
     orientation: Int,
     onOrientationChange: (Int) -> Unit,
@@ -1004,6 +1016,29 @@ private fun SettingsSheet(
                 Switch(
                     checked = touchEnabled,
                     onCheckedChange = onTouchEnabledChange,
+                    colors = SwitchDefaults.colors(checkedTrackColor = Accent)
+                )
+            }
+            Spacer(Modifier.height(20.dp))
+
+            // Fingers as a laptop touchpad. Applies at once, like touch input.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Touchpad mode", fontSize = 14.sp, color = Color(0xFFB0B0C0))
+                    Text(
+                        "Fingers move the pointer like a laptop touchpad: tap to click, two fingers to scroll or right-click. The pen is unchanged. Turn on Graphics tablet as well to use the whole tablet as a touchpad with a dark screen",
+                        fontSize = 11.sp,
+                        color = Color(0xFF6A6A7E)
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = touchpadMode,
+                    onCheckedChange = onTouchpadModeChange,
+                    enabled = touchEnabled,
                     colors = SwitchDefaults.colors(checkedTrackColor = Accent)
                 )
             }
