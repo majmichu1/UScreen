@@ -3,13 +3,30 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
-## Unreleased
+## 1.2.13 — 2026-11-04
 
 - Less delay on the tablet, most of all when little on the screen is moving.
   Each frame used to wait for two later frames before it left the computer,
   and for a third with VAAPI (Intel and AMD). Frames only exist when the
   screen changes, so on a quiet desktop one small change could take about
-  600 ms to appear. Frames now leave as soon as they are encoded.
+  600 ms to appear. Frames now leave as soon as they are encoded
+  ([#44](https://github.com/majmichu1/UScreen/issues/44), from
+  [#45](https://github.com/majmichu1/UScreen/pull/45) by KMilhan).
+- The tablet app no longer sends an old Apply again when it reconnects. It
+  kept the last settings in memory and put them back on every connect, which
+  undid a newer `fps` or bitrate set on the computer
+  ([#37](https://github.com/majmichu1/UScreen/issues/37), found by dijimmi,
+  fixed in [#48](https://github.com/majmichu1/UScreen/pull/48) by H234598).
+  This one is in the app, so update the app too.
+- The settings window checks that the chosen encoder really works before it
+  saves, and says so instead of reporting success for one that will not start
+  ([#47](https://github.com/majmichu1/UScreen/pull/47) by H234598). The same
+  check is available as `uscreen check-encoder -- h264_nvenc`.
+- `uscreen doctor` no longer says every KWin 6.8.2 crashes: patched 6.8.2
+  packages exist (Arch's `6.8.2-2`), and the warning now says so.
+- Docs: how to build the Arch package from the PKGBUILD archive
+  ([#42](https://github.com/majmichu1/UScreen/issues/42)), and why the
+  resolution goes back to the tablet's own (`auto_resolution`).
 
 ## 1.2.12 — 2026-10-31
 
