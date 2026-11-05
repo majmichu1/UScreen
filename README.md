@@ -127,6 +127,11 @@ extended display, pressure but no tilt.
 Everything lives in `~/.config/uscreen/config.toml` and is reachable from
 `uscreen-gui`, the ⚙ sheet in the tablet app, the tray icon, or CLI flags.
 
+The tablet sends bitrate and frame-rate changes when you press **Apply**.
+An offline change waits until it can be sent; a change already accepted by
+the WebSocket is not replayed on reconnect, so it cannot overwrite newer
+settings from the computer.
+
 - **Graphics tablet mode** — flip *Graphics tablet* on the tablet: nothing is
   streamed, the pen drives your own screen, zero display latency. Switch back
   the same way; no restart.
@@ -243,6 +248,11 @@ Compatibility reports are the most useful thing right now; see
 [CONTRIBUTING.md](CONTRIBUTING.md). Issues tagged `good first issue` are
 self-contained. Questions go to
 [Discussions](https://github.com/majmichu1/UScreen/discussions).
+
+To check configuration delivery against the real Android class, connect a
+device and run `scripts/check-pending-config.sh DEVICE_SERIAL` with JDK 17
+and `ANDROID_HOME` set. This builds a debug APK and runs a separate assertion
+process on the device; it does not install or launch the app.
 
 ## License
 
