@@ -92,14 +92,12 @@ impl StreamServer {
             };
 
             info!("Client connected: {}", peer);
-            // Ask for a keyframe now rather than letting this client stare at
-            // nothing until the next scheduled one.
-            self.idr_wanted.store(true, Ordering::SeqCst);
             let rx = video_rx.resubscribe();
             let cc = self.codec_config.clone();
             let token = self.config.token.clone();
+            let idr_wanted = self.idr_wanted.clone();
             tokio::spawn(async move {
-                if let Err(e) = Self::handle_client(socket, rx, cc, token).await {
+                if let Err(e) = Self::handle_client(socket, rx, cc, token, idr_wanted).await {
                     warn!("Client {} disconnected: {}", peer, e);
                 }
                 info!("Client {} session ended", peer);
@@ -114,6 +112,7 @@ impl StreamServer {
         mut rx: broadcast::Receiver<VideoPacket>,
         codec_config: Arc<Mutex<Option<Bytes>>>,
         token: Option<String>,
+        idr_wanted: Arc<AtomicBool>,
     ) -> Result<()> {
         // Disable Nagle's algorithm for lower latency
         socket.set_nodelay(true)?;
@@ -135,6 +134,13 @@ impl StreamServer {
                 return Ok(());
             }
         }
+
+        // Ask for a keyframe now rather than letting this client stare at
+        // nothing until the next scheduled one. Only after it has
+        // authenticated: any local process can open this port, and before the
+        // check it could force a keyframe, which costs the real tablet a burst
+        // of bitrate, as often as it liked.
+        idr_wanted.store(true, Ordering::SeqCst);
 
         // Cap the kernel send buffer. Linux auto-tunes this into the megabytes,
         // which on a link slower than the encoder means frames sit invisibly in

@@ -3,6 +3,14 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
+## Unreleased
+
+- The video port no longer asks for a keyframe before the client has shown the
+  session token. Any local process can open that port, and until now it could
+  make the encoder send a keyframe, and so a burst of bitrate to the real
+  tablet, as often as it liked. It could not see anything: the connection was
+  dropped after three seconds, as before.
+
 ## 1.2.13 — 2026-11-04
 
 - Less delay on the tablet, most of all when little on the screen is moving.
