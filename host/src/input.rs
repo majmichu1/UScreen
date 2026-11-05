@@ -16,6 +16,7 @@ use tracing::{error, info, warn};
 // Linux input event constants
 const EV_SYN: u16 = 0x00;
 const EV_KEY: u16 = 0x01;
+const EV_REL: u16 = 0x02;
 const EV_ABS: u16 = 0x03;
 
 const SYN_REPORT: u16 = 0x00;
@@ -38,12 +39,22 @@ const ABS_TILT_Y: u16 = 0x1b;
 
 const BTN_STYLUS: u16 = 0x14b;
 const BTN_LEFT: u16 = 0x110;
+const BTN_RIGHT: u16 = 0x111;
+const BTN_MIDDLE: u16 = 0x112;
+
+const REL_X: u16 = 0x00;
+const REL_Y: u16 = 0x01;
+const REL_HWHEEL: u16 = 0x06;
+const REL_WHEEL: u16 = 0x08;
+const REL_WHEEL_HI_RES: u16 = 0x0b;
+const REL_HWHEEL_HI_RES: u16 = 0x0c;
 
 // uinput ioctl constants (modern UI_DEV_SETUP/UI_ABS_SETUP API — the legacy
 // uinput_user_dev write() API cannot declare axis resolution, which makes
 // libinput reject the device: "missing tablet capabilities ... resolution")
 const UI_SET_EVBIT: libc::c_ulong = 0x40045564;
 const UI_SET_KEYBIT: libc::c_ulong = 0x40045565;
+const UI_SET_RELBIT: libc::c_ulong = 0x40045566;
 const UI_SET_ABSBIT: libc::c_ulong = 0x40045567;
 const UI_SET_PROPBIT: libc::c_ulong = 0x4004556e;
 const UI_DEV_SETUP: libc::c_ulong = 0x405c5503;
@@ -66,9 +77,11 @@ const UINPUT_VENDOR: u16 = 0x4553;
 const PRODUCT_TOUCH: u16 = 0x0001;
 const PRODUCT_PEN: u16 = 0x0002;
 const PRODUCT_POINTER: u16 = 0x0003;
+const PRODUCT_TOUCHPAD: u16 = 0x0004;
 const TOUCH_DEVICE_NAME: &str = "UScreen Touch";
 const PEN_DEVICE_NAME: &str = "UScreen Pen";
 const POINTER_DEVICE_NAME: &str = "UScreen Pointer";
+const TOUCHPAD_DEVICE_NAME: &str = "UScreen Touchpad";
 
 /// Device names and product ids for the N-th tablet. The first keeps the
 /// original names and ids so existing KWin input mappings stay valid; every
@@ -79,9 +92,11 @@ pub struct DeviceIdentity {
     pub touch: String,
     pub pen: String,
     pub pointer: String,
+    pub touchpad: String,
     pub product_touch: u16,
     pub product_pen: u16,
     pub product_pointer: u16,
+    pub product_touchpad: u16,
     /// How many of the three devices exist: 2 when pointer_handoff is off.
     pub device_count: usize,
 }
@@ -94,9 +109,11 @@ impl DeviceIdentity {
             touch: format!("{}{}", TOUCH_DEVICE_NAME, suffix),
             pen: format!("{}{}", PEN_DEVICE_NAME, suffix),
             pointer: format!("{}{}", POINTER_DEVICE_NAME, suffix),
+            touchpad: format!("{}{}", TOUCHPAD_DEVICE_NAME, suffix),
             product_touch: PRODUCT_TOUCH + base,
             product_pen: PRODUCT_PEN + base,
             product_pointer: PRODUCT_POINTER + base,
+            product_touchpad: PRODUCT_TOUCHPAD + base,
             device_count: 3,
         }
     }
@@ -187,6 +204,20 @@ pub enum InputEvent {
     /// the other output and brings the virtual display up or down to match.
     #[serde(rename = "mode")]
     Mode { pen_only: bool },
+    /// Touchpad mode: the finger moved the pointer by this many tablet
+    /// pixels, relative to where it was. The tablet does the gesture
+    /// recognition; the computer only gets plain mouse events.
+    #[serde(rename = "rel")]
+    Rel { dx: f64, dy: f64 },
+    /// Touchpad mode: a mouse button went down or up. 0 = left, 1 = right,
+    /// 2 = middle.
+    #[serde(rename = "button")]
+    Button { button: u8, down: bool },
+    /// Touchpad mode: two-finger scroll, in tablet pixels. Positive `dy` is
+    /// the wheel turning forward (the content moves down), positive `dx` the
+    /// content moving right; the tablet picks the direction it wants.
+    #[serde(rename = "scroll")]
+    Scroll { dx: f64, dy: f64 },
     /// Must be the first message on the socket. Proves the client is the
     /// tablet this daemon launched, not some other process on the loopback.
     #[serde(rename = "auth")]
@@ -385,6 +416,77 @@ impl UInputDevice {
         info!("uinput pointer '{}' created", name);
         std::thread::sleep(std::time::Duration::from_millis(200));
         Ok(Self { file })
+    }
+
+    /// A plain relative mouse. Created the first time touchpad mode sends
+    /// something, so people who never use it never get the extra device.
+    fn new_mouse(name: &str, product: u16) -> Result<Self> {
+        let file = Self::open_uinput()?;
+        let fd = file.as_raw_fd();
+
+        unsafe {
+            Self::ioctl_val(fd, UI_SET_EVBIT, EV_SYN as i32)?;
+            Self::ioctl_val(fd, UI_SET_EVBIT, EV_KEY as i32)?;
+            Self::ioctl_val(fd, UI_SET_EVBIT, EV_REL as i32)?;
+            for b in [BTN_LEFT, BTN_RIGHT, BTN_MIDDLE] {
+                Self::ioctl_val(fd, UI_SET_KEYBIT, b as i32)?;
+            }
+            for r in [REL_X, REL_Y, REL_WHEEL, REL_HWHEEL, REL_WHEEL_HI_RES, REL_HWHEEL_HI_RES] {
+                Self::ioctl_val(fd, UI_SET_RELBIT, r as i32)?;
+            }
+            Self::dev_setup_and_create(fd, name, product)?;
+        }
+
+        info!("uinput mouse '{}' created", name);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        Ok(Self { file })
+    }
+
+    fn move_by(&mut self, dx: i32, dy: i32) -> Result<()> {
+        if dx == 0 && dy == 0 {
+            return Ok(());
+        }
+        if dx != 0 { self.emit(EV_REL, REL_X, dx)?; }
+        if dy != 0 { self.emit(EV_REL, REL_Y, dy)?; }
+        self.syn()
+    }
+
+    fn press(&mut self, button: u8, down: bool) -> Result<()> {
+        let code = match button {
+            1 => BTN_RIGHT,
+            2 => BTN_MIDDLE,
+            _ => BTN_LEFT,
+        };
+        self.emit(EV_KEY, code, down as i32)?;
+        self.syn()
+    }
+
+    /// Scroll by `dx`/`dy` in high-resolution units (120 per wheel notch, the
+    /// kernel's convention). The legacy whole-notch axes are fed from the
+    /// remainder so applications that ignore the hi-res ones still scroll.
+    fn scroll_by(&mut self, dx: i32, dy: i32, rest: &mut (i32, i32)) -> Result<()> {
+        if dx == 0 && dy == 0 {
+            return Ok(());
+        }
+        if dy != 0 {
+            self.emit(EV_REL, REL_WHEEL_HI_RES, dy)?;
+            rest.1 += dy;
+            let notches = rest.1 / 120;
+            if notches != 0 {
+                self.emit(EV_REL, REL_WHEEL, notches)?;
+                rest.1 -= notches * 120;
+            }
+        }
+        if dx != 0 {
+            self.emit(EV_REL, REL_HWHEEL_HI_RES, dx)?;
+            rest.0 += dx;
+            let notches = rest.0 / 120;
+            if notches != 0 {
+                self.emit(EV_REL, REL_HWHEEL, notches)?;
+                rest.0 -= notches * 120;
+            }
+        }
+        self.syn()
     }
 
     unsafe fn abs_setup(fd: i32, code: u16, min: i32, max: i32, resolution: i32) -> Result<()> {
@@ -632,6 +734,17 @@ struct InjectDevices {
     /// Takes over the cursor when the pen leaves proximity, so it stays where
     /// the user last pointed instead of vanishing.
     pointer: Option<UInputDevice>,
+    /// Relative mouse for touchpad mode, made on first use.
+    mouse: Option<UInputDevice>,
+    mouse_name: String,
+    mouse_product: u16,
+    /// Mouse buttons held down (bit 0 left, 1 right, 2 middle), so a dropped
+    /// connection releases them.
+    mouse_buttons: u8,
+    /// Scroll left over after whole notches were sent, per axis.
+    scroll_rest: (i32, i32),
+    /// Sub-pixel remainder of pointer movement.
+    rel_rest: (f64, f64),
     last_pen_pos: (i32, i32),
     /// Where the output the pen addresses sits on the desktop, as fractions
     /// of the whole desktop: (x, y, width, height).
@@ -690,8 +803,42 @@ impl InjectDevices {
             }
         }
         self.pen_button = false;
+
+        if self.mouse_buttons != 0 {
+            if let Some(ref mut dev) = self.mouse {
+                for (bit, code) in [(1u8, BTN_LEFT), (2, BTN_RIGHT), (4, BTN_MIDDLE)] {
+                    if self.mouse_buttons & bit != 0 {
+                        let _ = dev.emit(EV_KEY, code, 0);
+                    }
+                }
+                let _ = dev.syn();
+            }
+        }
+        self.mouse_buttons = 0;
+        self.rel_rest = (0.0, 0.0);
+        self.scroll_rest = (0, 0);
+    }
+
+    /// The touchpad-mode mouse, created on first use. `None` when uinput is
+    /// not available, in which case the events are dropped (and logged once,
+    /// by the failed creation).
+    fn mouse(&mut self) -> Option<&mut UInputDevice> {
+        if self.mouse.is_none() {
+            match UInputDevice::new_mouse(&self.mouse_name, self.mouse_product) {
+                Ok(dev) => self.mouse = Some(dev),
+                Err(e) => {
+                    warn!("No touchpad device: {}. Touchpad mode will do nothing.", e);
+                    return None;
+                }
+            }
+        }
+        self.mouse.as_mut()
     }
 }
+
+/// High-resolution wheel units per tablet pixel of two-finger travel: one
+/// notch (120 units) per 40 px, about what a laptop touchpad feels like.
+const SCROLL_UNITS_PER_PX: f64 = 3.0;
 
 const KWIN_INPUT_IFACE: &str = "org.kde.KWin.InputDevice";
 
@@ -1177,6 +1324,12 @@ impl InputServer {
                 touch,
                 pen,
                 pointer,
+                mouse: None,
+                mouse_name: ident_bg.touchpad.clone(),
+                mouse_product: ident_bg.product_touchpad,
+                mouse_buttons: 0,
+                scroll_rest: (0, 0),
+                rel_rest: (0.0, 0.0),
                 last_pen_pos: (0, 0),
                 active_slots: 0,
                 pen_proximity: false,
@@ -1189,6 +1342,12 @@ impl InputServer {
             touch: None,
             pen: None,
             pointer: None,
+            mouse: None,
+            mouse_name: TOUCHPAD_DEVICE_NAME.into(),
+            mouse_product: PRODUCT_TOUCHPAD,
+            mouse_buttons: 0,
+            scroll_rest: (0, 0),
+            rel_rest: (0.0, 0.0),
             last_pen_pos: (0, 0),
             active_slots: 0,
             pen_proximity: false,
@@ -1690,6 +1849,45 @@ fn handle_event(
         // Already consumed by handle_connection; a second one is harmless.
         InputEvent::Auth { .. } => {}
 
+        InputEvent::Rel { dx, dy } => {
+            if let Ok(mut guard) = uinput.lock() {
+                // Keep the fraction: slow movements are often well under one
+                // pixel per sample and would otherwise never move at all.
+                let fx = guard.rel_rest.0 + dx;
+                let fy = guard.rel_rest.1 + dy;
+                let (ix, iy) = (fx.trunc(), fy.trunc());
+                guard.rel_rest = (fx - ix, fy - iy);
+                if let Some(dev) = guard.mouse() {
+                    if let Err(e) = dev.move_by(ix as i32, iy as i32) {
+                        warn!("Failed to move the touchpad pointer: {}", e);
+                    }
+                }
+            }
+        }
+        InputEvent::Button { button, down } => {
+            if let Ok(mut guard) = uinput.lock() {
+                let bit = match button { 1 => 2u8, 2 => 4, _ => 1 };
+                if let Some(dev) = guard.mouse() {
+                    if dev.press(button, down).is_ok() {
+                        if down { guard.mouse_buttons |= bit } else { guard.mouse_buttons &= !bit }
+                    }
+                }
+            }
+        }
+        InputEvent::Scroll { dx, dy } => {
+            if let Ok(mut guard) = uinput.lock() {
+                let ux = (dx * SCROLL_UNITS_PER_PX) as i32;
+                let uy = (dy * SCROLL_UNITS_PER_PX) as i32;
+                let mut rest = guard.scroll_rest;
+                if let Some(dev) = guard.mouse() {
+                    if let Err(e) = dev.scroll_by(ux, uy, &mut rest) {
+                        warn!("Failed to scroll: {}", e);
+                    }
+                }
+                guard.scroll_rest = rest;
+            }
+        }
+
         InputEvent::Mode { pen_only } => {
             // Only publish a real change. A watch send always wakes every
             // follower, so re-sending the current mode would tear the virtual
@@ -1791,6 +1989,48 @@ mod tests {
         assert_eq!(pressure(&f[3]), Some(PEN_PRESSURE_MAX), "clamped to the axis range");
         assert_eq!(pressure(&f[4]), Some(0), "hover stays at zero");
         assert_eq!(pressure(&f[5]), Some(0), "the lift stays at zero");
+    }
+
+    #[test]
+    fn touchpad_motion_and_clicks_become_mouse_events() {
+        let (mut dev, path) = device_over_file("mouse");
+        dev.move_by(5, -3).unwrap();
+        dev.move_by(0, 0).unwrap(); // nothing to say, no frame
+        dev.press(0, true).unwrap();
+        dev.press(0, false).unwrap();
+        dev.press(1, true).unwrap();
+        let f = frames(&path);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(f.len(), 4);
+        assert_eq!(f[0], vec![(EV_REL, REL_X, 5), (EV_REL, REL_Y, -3)]);
+        assert_eq!(f[1], vec![(EV_KEY, BTN_LEFT, 1)]);
+        assert_eq!(f[2], vec![(EV_KEY, BTN_LEFT, 0)]);
+        assert_eq!(f[3], vec![(EV_KEY, BTN_RIGHT, 1)]);
+    }
+
+    #[test]
+    fn scroll_sends_hi_res_units_and_whole_notches_from_the_remainder() {
+        let (mut dev, path) = device_over_file("scroll");
+        let mut rest = (0, 0);
+        dev.scroll_by(0, 90, &mut rest).unwrap(); // not a notch yet
+        dev.scroll_by(0, 90, &mut rest).unwrap(); // 180 total: one notch, 60 left
+        dev.scroll_by(-240, 0, &mut rest).unwrap(); // two notches left
+        let f = frames(&path);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(f[0], vec![(EV_REL, REL_WHEEL_HI_RES, 90)]);
+        assert_eq!(f[1], vec![(EV_REL, REL_WHEEL_HI_RES, 90), (EV_REL, REL_WHEEL, 1)]);
+        assert_eq!(f[2], vec![(EV_REL, REL_HWHEEL_HI_RES, -240), (EV_REL, REL_HWHEEL, -2)]);
+        assert_eq!(rest, (0, 60));
+    }
+
+    #[test]
+    fn touchpad_messages_parse() {
+        let rel: InputEvent = serde_json::from_str(r#"{"type":"rel","dx":1.5,"dy":-2}"#).unwrap();
+        assert!(matches!(rel, InputEvent::Rel { dx, dy } if dx == 1.5 && dy == -2.0));
+        let b: InputEvent = serde_json::from_str(r#"{"type":"button","button":1,"down":true}"#).unwrap();
+        assert!(matches!(b, InputEvent::Button { button: 1, down: true }));
+        let sc: InputEvent = serde_json::from_str(r#"{"type":"scroll","dx":0,"dy":12}"#).unwrap();
+        assert!(matches!(sc, InputEvent::Scroll { dy, .. } if dy == 12.0));
     }
 
     #[test]
