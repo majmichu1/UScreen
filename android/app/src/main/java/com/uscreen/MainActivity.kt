@@ -1029,7 +1029,7 @@ private fun SettingsSheet(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Touchpad mode", fontSize = 14.sp, color = Color(0xFFB0B0C0))
                     Text(
-                        "Fingers move the pointer like a laptop touchpad: tap to click, two fingers to scroll or right-click. The pen is unchanged",
+                        "Fingers move the pointer like a laptop touchpad: tap to click, two fingers to scroll or right-click. The pen is unchanged. Turn on Graphics tablet as well to use the whole tablet as a touchpad with a dark screen",
                         fontSize = 11.sp,
                         color = Color(0xFF6A6A7E)
                     )

@@ -139,7 +139,9 @@ settings from the computer.
 - **Touchpad mode** — in the tablet's ⚙: fingers move the pointer like a laptop
   touchpad instead of touching where they land. Tap to click, tap and drag to
   drag, two fingers to scroll, two-finger tap for right click. The pen is
-  unchanged.
+  unchanged. With *Graphics tablet* on as well, nothing is streamed and the
+  screen goes dark: the whole tablet is a touchpad, plus the pen on your own
+  screen.
 - **Position** — `right` (default), `left`, `above`, `below` your real screens.
 - **Pen and mouse** — `pointer_handoff = false` (or the checkbox in the GUI)
   stops the pen from moving the desktop cursor: pen and touch drive the
