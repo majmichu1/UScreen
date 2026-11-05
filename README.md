@@ -227,7 +227,8 @@ icon, any-side placement, several tablets, HEVC and 10-bit, Wi-Fi fallback,
 packages for five distribution families, `uscreen doctor`, measured latency.
 
 Next: **AOA transport** — removing the USB-debugging requirement, the last
-step between this and simply plugging a cable in. Input mapping on
+step between this and simply plugging a cable in. Wireless without adb, with pairing, is
+designed but not built: [docs/wireless-design.md](docs/wireless-design.md). Input mapping on
 GNOME and X11 ([#4](https://github.com/majmichu1/UScreen/issues/4)) is in as of
 1.2.8 but waiting for someone to confirm it on a real desktop; then a
 **PipeWire/dmabuf capture path**: the EVDI cycle is serial by design (the
