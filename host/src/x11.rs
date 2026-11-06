@@ -15,6 +15,38 @@
 
 use tracing::{info, warn};
 
+/// One native RandR subscription for the daemon. Polling the connection is
+/// nonblocking and sends no X requests; remapping runs only after an event.
+pub fn output_changes() -> Option<tokio::sync::watch::Receiver<()>> {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::{randr::{ConnectionExt, NotifyMask}, Event};
+    static CHANGES: std::sync::OnceLock<Option<tokio::sync::watch::Receiver<()>>> = std::sync::OnceLock::new();
+    if !active() { return None; }
+    CHANGES.get_or_init(|| {
+        let (conn, screen) = x11rb::connect(None).ok()?;
+        let root = conn.setup().roots[screen].root;
+        conn.randr_select_input(root, NotifyMask::SCREEN_CHANGE | NotifyMask::CRTC_CHANGE | NotifyMask::OUTPUT_CHANGE)
+            .ok()?.check().ok()?;
+        let (tx, rx) = tokio::sync::watch::channel(());
+        tokio::spawn(async move {
+            loop {
+                let mut changed = false;
+                loop {
+                    match conn.poll_for_event() {
+                        Ok(Some(Event::RandrNotify(_) | Event::RandrScreenChangeNotify(_))) => changed = true,
+                        Ok(Some(_)) => {}
+                        Ok(None) => break,
+                        Err(error) => { warn!("X11 monitor subscription ended: {}", error); return; }
+                    }
+                }
+                if changed { let _ = tx.send(()); }
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+        });
+        Some(rx)
+    }).clone()
+}
+
 fn command_exists(name: &str) -> bool {
     std::env::var("PATH")
         .unwrap_or_default()
@@ -71,14 +103,13 @@ fn targets_for(names: &[String]) -> Vec<Target> {
 ///
 /// Xorg does not call an EVDI output by its kernel name: an output of a
 /// secondary GPU gets a suffix, so `DVI-I-1` in sysfs shows up as `DVI-I-1-1`
-/// in xrandr. The EDID is the reliable identity — it is the one we wrote — and
-/// it also keeps a real DVI monitor that really is called `DVI-I-1` from being
-/// taken for ours. Only when an output has no EDID to compare does the name
-/// decide, with the suffix allowed.
+/// in xrandr. Match that connector name and, when present, its EDID: two
+/// identical tablets can have identical EDIDs. The EDID also keeps a real DVI
+/// monitor called `DVI-I-1` from being taken for our suffixed output.
 fn is_ours(o: &Output, targets: &[Target]) -> bool {
     targets.iter().any(|t| {
-        if !o.edid.is_empty() && !t.edid.is_empty() {
-            return o.edid == t.edid;
+        if !o.edid.is_empty() && !t.edid.is_empty() && o.edid != t.edid {
+            return false;
         }
         o.name == t.name
             || o.name
@@ -235,7 +266,8 @@ fn belongs_to(listed: &str, wanted: &str) -> bool {
     match listed.strip_prefix(wanted) {
         Some("") => true,
         Some(rest) => {
-            rest.starts_with(' ') && !rest.trim().chars().all(|c| c.is_ascii_digit())
+            rest.starts_with(' ') && !rest.split_whitespace().next()
+                .is_some_and(|word| word.chars().all(|c| c.is_ascii_digit()))
         }
         None => false,
     }
@@ -327,10 +359,24 @@ DVI-I-1-1 connected (normal left inverted right x axis y axis) 314mm x 195mm\n\
     }
 
     #[test]
+    fn identical_tablet_edids_still_select_the_requested_connector() {
+        let edid = crate::edid::make_edid(2560, 1600, 60);
+        let target = vec![Target { name: "DVI-I-2".into(), edid: edid.clone() }];
+        for (name, expected) in [("DVI-I-1-1", false), ("DVI-I-2-2", true)] {
+            let output = Output { name: name.into(), connected: true,
+                geometry: Some((2560, 1600, 0, 0)), primary: false, edid: edid.clone() };
+            assert_eq!(is_ours(&output, &target), expected, "{name}");
+        }
+    }
+
+    #[test]
     fn matches_a_device_and_its_sub_devices_but_not_the_next_tablet() {
         assert!(belongs_to("UScreen Pen", "UScreen Pen"));
         assert!(belongs_to("UScreen Pen Pen (0)", "UScreen Pen"));
         assert!(!belongs_to("UScreen Pen 2", "UScreen Pen"));
+        assert!(!belongs_to("UScreen Pen 2 stylus", "UScreen Pen"));
+        assert!(!belongs_to("UScreen Pen 3 eraser", "UScreen Pen"));
+        assert!(belongs_to("UScreen Pen 2 stylus", "UScreen Pen 2"));
         assert!(!belongs_to("UScreen Pointer", "UScreen Pen"));
         assert!(belongs_to("UScreen Pen 2", "UScreen Pen 2"));
     }

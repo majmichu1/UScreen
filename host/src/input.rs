@@ -1073,6 +1073,11 @@ async fn map_devices_on_x11(
         warn!("X11 has no output to map onto — touch and pen will address the whole desktop");
         return None;
     };
+    if std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_uppercase().contains("CINNAMON")
+        && !crate::gnome::map_cinnamon_devices(UINPUT_VENDOR, ident.product_touch, ident.product_pen,
+            (!pen_only).then_some(output.as_str())).await {
+        warn!("Cinnamon did not accept its native input mapping; using XInput mapping");
+    }
     let mut names = vec![ident.touch.as_str(), ident.pen.as_str()];
     if ident.device_count > 2 {
         names.push(ident.pointer.as_str());
@@ -1367,6 +1372,7 @@ impl InputServer {
             let ident_map = ident.clone();
             let initial = *mode_rx.borrow_and_update();
             let card0 = *card_rx.borrow_and_update();
+            let mut output_changes = crate::x11::output_changes();
             // The first mapping waits for the virtual display to be enabled
             // like every later one, so it runs in the background rather than
             // holding up the accept loop below.
@@ -1376,6 +1382,12 @@ impl InputServer {
                     tokio::select! {
                         r = mode_rx.changed() => { if r.is_err() { break; } }
                         r = card_rx.changed() => { if r.is_err() { break; } }
+                        r = async {
+                            match output_changes.as_mut() {
+                                Some(rx) => rx.changed().await,
+                                None => std::future::pending().await,
+                            }
+                        } => { if r.is_err() { output_changes = None; continue; } }
                     }
                     let pen_only = *mode_rx.borrow();
                     let card = *card_rx.borrow();

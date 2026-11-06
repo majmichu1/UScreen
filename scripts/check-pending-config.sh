@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the real TouchCapture class on Android without installing or launching the app.
+# Run real control-delivery and decoder-failure checks without installing the app.
 # Usage: ANDROID_HOME=/path/to/sdk scripts/check-pending-config.sh DEVICE_SERIAL
 set -euo pipefail
 
@@ -18,7 +18,7 @@ trap cleanup EXIT
 cd "$root/android"
 ./gradlew --no-daemon :app:assembleDebug :app:compileDebugUnitTestJavaWithJavac
 classes=app/build/intermediates/javac/debugUnitTest/classes
-mapfile -d '' checks < <(find "$classes/com/uscreen" -name 'PendingConfigCheck*.class' -print0)
+mapfile -d '' checks < <(find "$classes/com/uscreen" \( -name 'PendingConfigCheck*.class' -o -name 'DecoderFailureCheck*.class' \) -print0)
 (( ${#checks[@]} )) || { echo 'Regression check classes were not compiled' >&2; exit 1; }
 for candidate in "$sdk"/build-tools/*/d8; do
     [[ -x "$candidate" ]] && d8=$candidate
@@ -30,3 +30,4 @@ adb -s "$serial" shell mkdir -p "$remote"
 adb -s "$serial" push app/build/outputs/apk/debug/app-debug.apk "$remote/app.apk" >/dev/null
 adb -s "$serial" push "$scratch/checks.jar" "$remote/checks.jar" >/dev/null
 adb -s "$serial" shell "CLASSPATH=$remote/app.apk:$remote/checks.jar app_process / com.uscreen.PendingConfigCheck"
+adb -s "$serial" shell "CLASSPATH=$remote/app.apk:$remote/checks.jar app_process / com.uscreen.DecoderFailureCheck"

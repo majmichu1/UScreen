@@ -261,7 +261,7 @@ Compatibility reports are the most useful thing right now; see
 self-contained. Questions go to
 [Discussions](https://github.com/majmichu1/UScreen/discussions).
 
-To check configuration delivery against the real Android class, connect a
+To check configuration delivery and decoder failure recovery against the real Android classes, connect a
 device and run `scripts/check-pending-config.sh DEVICE_SERIAL` with JDK 17
 and `ANDROID_HOME` set. This builds a debug APK and runs a separate assertion
 process on the device; it does not install or launch the app.

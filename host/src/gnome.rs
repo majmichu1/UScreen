@@ -54,15 +54,19 @@ fn parse_monitors(json: &str) -> Option<Vec<[String; 4]>> {
 }
 
 async fn monitors() -> Option<Vec<[String; 4]>> {
+    monitors_from("org.gnome.Mutter.DisplayConfig", "/org/gnome/Mutter/DisplayConfig").await
+}
+
+async fn monitors_from(service: &str, path: &str) -> Option<Vec<[String; 4]>> {
     let json = output_of(
         "busctl",
         &[
             "--user",
             "--json=short",
             "call",
-            "org.gnome.Mutter.DisplayConfig",
-            "/org/gnome/Mutter/DisplayConfig",
-            "org.gnome.Mutter.DisplayConfig",
+            service,
+            path,
+            service,
             "GetCurrentState",
         ],
     )
@@ -79,13 +83,17 @@ enum Kind {
 /// The relocatable schema with its per-device path, which GNOME builds from
 /// the device's USB ids as four lowercase hex digits each.
 fn schema_with_path(kind: Kind, vendor: u16, product: u16) -> String {
+    desktop_schema_with_path("gnome", kind, vendor, product)
+}
+
+fn desktop_schema_with_path(desktop: &str, kind: Kind, vendor: u16, product: u16) -> String {
     match kind {
         Kind::Tablet => format!(
-            "org.gnome.desktop.peripherals.tablet:/org/gnome/desktop/peripherals/tablets/{:04x}:{:04x}/",
+            "org.{desktop}.desktop.peripherals.tablet:/org/{desktop}/desktop/peripherals/tablets/{:04x}:{:04x}/",
             vendor, product
         ),
         Kind::Touchscreen => format!(
-            "org.gnome.desktop.peripherals.touchscreen:/org/gnome/desktop/peripherals/touchscreens/{:04x}:{:04x}/",
+            "org.{desktop}.desktop.peripherals.touchscreen:/org/{desktop}/desktop/peripherals/touchscreens/{:04x}:{:04x}/",
             vendor, product
         ),
     }
@@ -114,6 +122,33 @@ async fn set_output(schema_path: &str, text: &str) -> bool {
             false
         }
     }
+}
+
+fn unique_monitor<'a>(monitors: &'a [[String; 4]], connector: &str) -> Option<&'a [String; 4]> {
+    let target = monitors.iter().find(|m| m[0] == connector)?;
+    (monitors.iter().filter(|m| m[1..] == target[1..]).count() == 1).then_some(target)
+}
+
+/// Muffin can overwrite a direct XInput transform with its automatic guess.
+/// Give Cinnamon the explicit per-device EDID triple as well. Pen-only mode
+/// clears it before the X11 path maps onto the physical primary output.
+pub async fn map_cinnamon_devices(vendor: u16, touch_product: u16, pen_product: u16, output: Option<&str>) -> bool {
+    let text = if let Some(output) = output {
+        let Some(monitors) = monitors_from("org.cinnamon.Muffin.DisplayConfig", "/org/cinnamon/Muffin/DisplayConfig").await else {
+            warn!("Cinnamon did not report its monitor identities");
+            return false;
+        };
+        let Some(m) = unique_monitor(&monitors, output) else {
+            warn!("Cinnamon has no unique EDID identity for {}", output);
+            return false;
+        };
+        triple_text(Some([&m[1], &m[2], &m[3]]))
+    } else { triple_text(None) };
+    let pen = desktop_schema_with_path("cinnamon", Kind::Tablet, vendor, pen_product);
+    let touch = desktop_schema_with_path("cinnamon", Kind::Touchscreen, vendor, touch_product);
+    let pen_ok = set_output(&pen, &text).await;
+    let touch_ok = set_output(&touch, &text).await;
+    pen_ok && touch_ok
 }
 
 /// Map the pen and touch devices to the first of `connectors` mutter lists,
@@ -187,5 +222,18 @@ mod tests {
         assert_eq!(triple_text(Some(["USC", "UScreen", "1"])), "['USC', 'UScreen', '1']");
         assert_eq!(triple_text(Some(["A'B", "x", "y"])), "['A\\'B', 'x', 'y']");
         assert_eq!(triple_text(None), "['', '', '']");
+        assert_eq!(desktop_schema_with_path("cinnamon", Kind::Touchscreen, 0x4553, 0x11),
+            "org.cinnamon.desktop.peripherals.touchscreen:/org/cinnamon/desktop/peripherals/touchscreens/4553:0011/");
+    }
+
+    #[test]
+    fn explicit_mapping_requires_a_unique_monitor_identity() {
+        let mut monitors = vec![
+            ["DVI-I-1".into(), "USC".into(), "UScreen".into(), "1".into()],
+            ["DVI-I-2".into(), "USC".into(), "UScreen".into(), "1".into()],
+        ];
+        assert!(unique_monitor(&monitors, "DVI-I-2").is_none());
+        monitors[1][3] = "2".into();
+        assert_eq!(unique_monitor(&monitors, "DVI-I-2"), Some(&monitors[1]));
     }
 }

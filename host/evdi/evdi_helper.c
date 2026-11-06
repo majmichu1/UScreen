@@ -334,7 +334,8 @@ static __thread unsigned char t_mean1[MEAN_MAX_OW * 4];
 
 static inline void convert_rows(const unsigned char *row0, const unsigned char *row1,
                                 unsigned char *yo0, unsigned char *yo1,
-                                unsigned char *uv, int w, int or_, int og, int ob) {
+                                unsigned char *uv, int w, int or_, int og, int ob,
+                                unsigned char *restrict ref0, unsigned char *restrict ref1) {
     /* Source and NV12 planes never overlap; iterations own disjoint pixels. */
     #pragma GCC ivdep
     for (int x = 0; x < w; x += 2) {
@@ -359,6 +360,10 @@ static inline void convert_rows(const unsigned char *row0, const unsigned char *
         if (cr < 0) cr = 0; else if (cr > 255) cr = 255;
         uv[x]   = (unsigned char)cb;
         uv[x+1] = (unsigned char)cr;
+        if (ref0) {
+            memcpy(ref0 + (size_t)x * 4, row0 + (size_t)x * 4, 8);
+            memcpy(ref1 + (size_t)x * 4, row1 + (size_t)x * 4, 8);
+        }
     }
 }
 
@@ -376,7 +381,7 @@ static inline void convert_strip_scaled(const conv_job_t *j) {
         /* The two output luma rows this chroma row covers. */
         scaled_row_means(j->src, stride, ow, n, (cy * 2) * n, ob, og, or_, t_mean0);
         scaled_row_means(j->src, stride, ow, n, (cy * 2 + 1) * n, ob, og, or_, t_mean1);
-        convert_rows(t_mean0, t_mean1, yo0, yo1, uv, ow, 2, 1, 0);
+        convert_rows(t_mean0, t_mean1, yo0, yo1, uv, ow, 2, 1, 0, NULL, NULL);
     }
 }
 
@@ -386,18 +391,21 @@ static inline void convert_strip(const conv_job_t *j) {
     for (int cy = j->cy0; cy < j->cy1; cy++) {
         if (!row_is_dirty(j->dirty, cy))
             continue;
-        snapshot_source_rows(j, cy);
         int y0 = cy * 2, y1 = y0 + 1;
         const unsigned char *row0 = j->src + (size_t)y0 * stride;
         const unsigned char *row1 = j->src + (size_t)y1 * stride;
         unsigned char *yo0 = j->ydst + (size_t)y0 * w;
         unsigned char *yo1 = j->ydst + (size_t)y1 * w;
         unsigned char *uv  = j->uvdst + (size_t)cy * w;
-        convert_rows(row0, row1, yo0, yo1, uv, w, or_, og, ob);
+        unsigned char *ref0 = g_reference_frame && g_mode_bpp == 4
+            ? g_reference_frame + (size_t)y0 * stride : NULL;
+        unsigned char *ref1 = ref0 ? ref0 + stride : NULL;
+        convert_rows(row0, row1, yo0, yo1, uv, w, or_, og, ob, ref0, ref1);
     }
 }
 
 #define MAX_CONV_THREADS 8
+static int g_conv_thread_limit = MAX_CONV_THREADS;
 static int g_nthreads = 1;
 static pthread_t g_pool[MAX_CONV_THREADS];
 static conv_job_t g_jobs[MAX_CONV_THREADS];
@@ -434,7 +442,7 @@ static void conv_pool_init(void) {
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     g_nthreads = (int)(n - 2);              /* leave cores for ffmpeg/KWin */
     if (g_nthreads < 1) g_nthreads = 1;
-    if (g_nthreads > MAX_CONV_THREADS) g_nthreads = MAX_CONV_THREADS;
+    if (g_nthreads > g_conv_thread_limit) g_nthreads = g_conv_thread_limit;
     /* Worker threads handle jobs 1..n-1; the caller runs job 0 itself. */
     for (int i = 1; i < g_nthreads; i++)
         pthread_create(&g_pool[i], NULL, conv_worker, (void *)(intptr_t)i);
@@ -811,9 +819,10 @@ static int try_open_fifo(void) {
     /* Switch back to blocking writes once connected */
     int flags = fcntl(fd, F_GETFL);
     fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
-    /* Enlarge the pipe so a full-frame write doesn't take hundreds of
-       64KB round-trips with the encoder. */
-    fcntl(fd, F_SETPIPE_SZ, 1 << 20);
+    /* A large request can be refused while a smaller increase is allowed.
+       Avoid hundreds of small round-trips with the encoder in that case. */
+    for (int size = 1 << 20; size >= 1 << 16; size >>= 1)
+        if (fcntl(fd, F_SETPIPE_SZ, size) >= 0) break;
     fprintf(stderr, "[evdi-helper] Capture FIFO opened\n");
     return fd;
 }
@@ -851,12 +860,18 @@ static void *writer_thread(void *arg) {
 
         int size;
         pthread_mutex_lock(&g_swap_mutex);
-        /* Wait for a frame, but no longer than one period so shutdown and
-           mode changes are still noticed promptly. */
+        /* Fresh frames signal this condition immediately. While idle, sleep
+           until the keepalive instead of waking on every frame-rate tick. */
         while (g_running && (!g_buffers_ready || !g_latest_valid)) {
+            long wait_ns = period_ns;
+            if (have_frame && g_buffers_ready && frame_generation == g_mode_generation) {
+                long long remaining_ms = IDLE_KEEPALIVE_MS - (now_ms() - g_last_write_ms);
+                if (remaining_ms <= 0) break;
+                wait_ns = (long)(remaining_ms * 1000000LL);
+            }
             struct timespec wait_until;
             clock_gettime(CLOCK_MONOTONIC, &wait_until);
-            wait_until.tv_nsec += period_ns;
+            wait_until.tv_nsec += wait_ns;
             while (wait_until.tv_nsec >= 1000000000L) {
                 wait_until.tv_nsec -= 1000000000L;
                 wait_until.tv_sec += 1;
@@ -905,8 +920,10 @@ static void *writer_thread(void *arg) {
            transmit no new information. The occasional keepalive keeps the
            encoder and the client's read timeout alive. */
         long long now_ms_write = now_ms();
-        if (!fresh && (now_ms_write - g_last_write_ms) < IDLE_KEEPALIVE_MS)
+        if (!fresh && (now_ms_write - g_last_write_ms) < IDLE_KEEPALIVE_MS) {
+            g_writer_busy = 0;
             continue;
+        }
         g_last_write_ms = now_ms_write;
 
         /* Rate limit against an absolute schedule, never against "now".
@@ -1168,11 +1185,23 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "--fps") == 0 && i + 1 < argc) {
             g_fps = atoi(argv[++i]);
             if (g_fps < 1 || g_fps > 240) g_fps = 60;
+        } else if (strcmp(argv[i], "--conversion-threads") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Missing conversion thread limit\n");
+                return 1;
+            }
+            char *end;
+            long limit = strtol(argv[++i], &end, 10);
+            if (*end || limit < 1 || limit > MAX_CONV_THREADS) {
+                fprintf(stderr, "Invalid conversion thread limit: %s\n", argv[i]);
+                return 1;
+            }
+            g_conv_thread_limit = (int)limit;
         }
     }
 
     if (!edid_path) {
-        fprintf(stderr, "Usage: %s --edid <edid.bin> [--capture-fifo <path>] [--fps <n>] [--scale <1-4>]\n", argv[0]);
+        fprintf(stderr, "Usage: %s --edid <edid.bin> [--capture-fifo <path>] [--fps <n>] [--scale <1-4>] [--conversion-threads <1-%d>]\n", argv[0], MAX_CONV_THREADS);
         return 1;
     }
 
@@ -1286,8 +1315,7 @@ int main(int argc, char *argv[]) {
     run_event_loop(handle);
 
     g_running = 0;
-    /* Wake the writer out of its condition wait so shutdown is immediate
-       rather than up to one frame period late. */
+    /* Wake the writer out of its condition wait so shutdown is immediate. */
     pthread_mutex_lock(&g_swap_mutex);
     pthread_cond_broadcast(&g_frame_ready);
     pthread_mutex_unlock(&g_swap_mutex);
