@@ -26,6 +26,15 @@ Full notes for each version are on the
   `DecoderFailureCheck` (run by `scripts/check-pending-config.sh`) and a normal
   stream with a daemon restart in between
   ([#53](https://github.com/majmichu1/UScreen/pull/53) by H234598).
+- Capture helper: the writer sleeps until the idle keepalive instead of waking on
+  every frame tick, the copy of the screen kept for the unchanged-frame check is
+  done while converting rather than in a second pass, and a refused 1 MB pipe
+  size falls back to smaller ones. New `--conversion-threads 1-8`; the host
+  passes 2 for sessions at native scale, up to 2560x1600 and 60 fps. On this
+  machine (20 cores) 2 threads and the default were equal in a mocked-grab
+  benchmark, so it should not cost latency. Tested on the tablet: idle, real
+  redraws and no EVDI kernel warnings
+  ([#55](https://github.com/majmichu1/UScreen/pull/55) by H234598).
 
 ## 1.2.14 — 2026-11-06
 
