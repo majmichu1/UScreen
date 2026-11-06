@@ -3,6 +3,22 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
+## Unreleased
+
+- The generated EDID stored the physical size of the screen in the wrong bytes
+  of its detailed timing, so a 314 x 195 mm tablet decoded as 3130 x 784 mm in
+  anything that reads that block instead of the basic one. Fixed, and the EDID
+  cache name changed so existing installs get the new bytes. KWin now reports
+  314 x 195 mm here, and the scale and position of the tablet's screen stayed
+  as they were
+  ([#51](https://github.com/majmichu1/UScreen/pull/51) by H234598).
+- With more than one tablet, the extra tablets' `adb reverse` mapped the host
+  port to the same number on the tablet, but the app always connects to 8890
+  and 8891 there, so the extra tablets could not reach their session. The
+  tablet side is now fixed at 8890/8891 and only the host port changes. The
+  same goes for a custom `video_port` / `input_port`
+  ([#52](https://github.com/majmichu1/UScreen/pull/52) by H234598).
+
 ## 1.2.14 — 2026-11-06
 
 Out on a Friday instead of the usual Saturday, because I am away this weekend.
