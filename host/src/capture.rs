@@ -657,6 +657,12 @@ impl CaptureManager {
         if self.config.stream_scale > 1 {
             cmd.args(["--scale", &self.config.stream_scale.to_string()]);
         }
+        // ponytail: two threads are tested through native 2560x1600 at 60 fps;
+        // benchmark larger, scaled or faster modes before extending this policy.
+        if self.config.stream_scale == 1 && self.config.fps <= 60
+            && self.config.width <= 2560 && self.config.height <= 1600 {
+            cmd.args(["--conversion-threads", "2"]);
+        }
 
         cmd.args(["--capture-fifo", &fifo]);
         if let Some(card) = self.config.card {

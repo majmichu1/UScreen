@@ -4,6 +4,7 @@
 #include "evdi_helper.c"
 #undef main
 #include <assert.h>
+#include <sys/resource.h>
 
 static int grabs;
 
@@ -209,6 +210,17 @@ static void vectorized_colour_blocks(void) {
     g_scale = 1;
 }
 
+static long writer_sleeps;
+
+static void *measured_writer(void *arg) {
+    struct rusage before, after;
+    assert(getrusage(RUSAGE_THREAD, &before) == 0);
+    void *result = writer_thread(arg);
+    assert(getrusage(RUSAGE_THREAD, &after) == 0);
+    writer_sleeps = after.ru_nvcsw - before.ru_nvcsw;
+    return result;
+}
+
 static void fifo_keepalive(void) {
     mode(4, 4, FOURCC('X','R','2','4'));
     black_frame();
@@ -221,7 +233,7 @@ static void fifo_keepalive(void) {
     g_framebuffer[g_off_r] = 255;
     grab_now();
     pthread_t writer;
-    assert(pthread_create(&writer, NULL, writer_thread, NULL) == 0);
+    assert(pthread_create(&writer, NULL, measured_writer, NULL) == 0);
     unsigned char bytes[4096];
     int total = 0;
     for (int i = 0; i < 40; i++) {
@@ -247,14 +259,40 @@ static void fifo_keepalive(void) {
                 if (bytes[i] == 235) changed = 1; /* real white output */
         }
     }
-    assert(changed && now_ms() - started < 200);
+    assert(changed && now_ms() - started < 100);
     printf("FIFO: %d frames during 40 unchanged grabs; real change in %lld ms\n",
            frames, now_ms() - started);
+
+    /* An idle writer must release its buffer claim before a mode switch;
+       otherwise the event loop waits a second and abandons the old buffers. */
+    usleep(50000);
+    long long mode_started = now_ms();
+    mode(6, 4, FOURCC('X','R','2','4'));
+    long long mode_ms = now_ms() - mode_started;
+    fprintf(stderr, "FIFO: mode change after idle took %lld ms\n", mode_ms);
+    assert(mode_ms < 500 && "idle writer must not stall mode changes");
+    /* Reads may combine old white frames and several new gray frames. */
+    int gray_bytes = 0;
+    long long gray_started = now_ms();
+    while (gray_bytes < 36 && now_ms() - gray_started < 500) {
+        struct pollfd new_mode = {.fd = fds[0], .events = POLLIN};
+        if (poll(&new_mode, 1, 20) <= 0) continue;
+        ssize_t n = read(fds[0], bytes, sizeof(bytes));
+        for (ssize_t i = 0; i < n && gray_bytes < 36; i++) {
+            if (!gray_bytes && bytes[i] != 37) continue;
+            assert(bytes[i] == (gray_bytes < 24 ? 37 : 128)); /* 6x4 gray NV12 */
+            gray_bytes++;
+        }
+    }
+    assert(gray_bytes == 36);
+
     g_running = 0;
     pthread_mutex_lock(&g_swap_mutex);
     pthread_cond_broadcast(&g_frame_ready);
     pthread_mutex_unlock(&g_swap_mutex);
     pthread_join(writer, NULL);
+    fprintf(stderr, "FIFO: writer voluntarily slept %ld times\n", writer_sleeps);
+    assert(writer_sleeps <= 20 && "idle writer must wait for keepalive, not every frame tick");
     close(fds[0]); close(fds[1]);
     g_capture_fifo_fd = -1;
 }
@@ -277,7 +315,11 @@ int main(int argc, char **argv) {
     pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
     pthread_cond_init(&g_frame_ready, &attr);
     pthread_condattr_destroy(&attr);
-    if (argc > 1 && strcmp(argv[1], "pool") == 0) conv_pool_init();
+    if (argc > 1 && (strcmp(argv[1], "pool") == 0 || strcmp(argv[1], "pool2") == 0)) {
+        if (strcmp(argv[1], "pool2") == 0) g_conv_thread_limit = 2;
+        conv_pool_init();
+        assert(g_nthreads <= g_conv_thread_limit);
+    }
     if (argc < 2 || strcmp(argv[1], "writer") != 0) {
         static_damage();
         padding_and_unused_channel();
