@@ -31,6 +31,7 @@ pub fn make_edid_sized(
     refresh: u32,
     width_mm: u32,
     height_mm: u32,
+    instance: u32,
 ) -> Vec<u8> {
     let mut edid = vec![0u8; 128];
 
@@ -44,7 +45,7 @@ pub fn make_edid_sized(
 
     // Product code / serial
     edid[10] = 0x01;
-    edid[12..16].copy_from_slice(&1u32.to_le_bytes());
+    edid[12..16].copy_from_slice(&(instance + 1).to_le_bytes());
 
     edid[16] = 0; // week
     edid[17] = 34; // year (2024-1990)
@@ -134,7 +135,7 @@ pub fn make_edid_sized(
 /// Build an EDID at the default physical size.
 #[cfg(test)]
 pub fn make_edid(width: u32, height: u32, refresh: u32) -> Vec<u8> {
-    make_edid_sized(width, height, refresh, DEFAULT_WIDTH_MM, DEFAULT_HEIGHT_MM)
+    make_edid_sized(width, height, refresh, DEFAULT_WIDTH_MM, DEFAULT_HEIGHT_MM, 0)
 }
 
 /// Bumped whenever the generator changes. It is part of the cache filename so
@@ -149,13 +150,14 @@ pub fn ensure_edid_sized(
     refresh: u32,
     width_mm: u32,
     height_mm: u32,
+    instance: u32,
 ) -> Result<PathBuf> {
     let home = std::env::var("HOME").unwrap_or_default();
     let dir = PathBuf::from(home).join(".local/share/uscreen/edid");
     std::fs::create_dir_all(&dir).context("create EDID dir")?;
     let path = dir.join(format!(
-        "auto-v{}-{}x{}@{}-{}x{}mm.bin",
-        EDID_GENERATION, width, height, refresh, width_mm, height_mm
+        "auto-v{}-slot{}-{}x{}@{}-{}x{}mm.bin",
+        EDID_GENERATION, instance, width, height, refresh, width_mm, height_mm
     ));
     if !path.exists() {
         // Written next to its final name and renamed into place: a crash
@@ -165,7 +167,7 @@ pub fn ensure_edid_sized(
         let tmp = path.with_extension("bin.tmp");
         std::fs::write(
             &tmp,
-            make_edid_sized(width, height, refresh, width_mm, height_mm),
+            make_edid_sized(width, height, refresh, width_mm, height_mm, instance),
         )
         .context("write EDID")?;
         std::fs::rename(&tmp, &path).context("place EDID")?;
@@ -185,7 +187,7 @@ pub fn ensure_edid_sized(
 /// Write (or reuse) a generated EDID at the default physical size.
 #[allow(dead_code)]
 pub fn ensure_edid(width: u32, height: u32, refresh: u32) -> Result<PathBuf> {
-    ensure_edid_sized(width, height, refresh, DEFAULT_WIDTH_MM, DEFAULT_HEIGHT_MM)
+    ensure_edid_sized(width, height, refresh, DEFAULT_WIDTH_MM, DEFAULT_HEIGHT_MM, 0)
 }
 
 #[cfg(test)]
@@ -215,4 +217,13 @@ mod tests {
             assert_eq!((h_act, v_act), (w, h));
         }
     }
+    #[test]
+    fn identical_tablet_modes_have_distinct_slot_identities() {
+        for instance in 0..3 {
+            let edid = make_edid_sized(2560, 1600, 60, 227, 142, instance);
+            assert_eq!(u32::from_le_bytes(edid[12..16].try_into().unwrap()), instance + 1);
+            assert_eq!(edid.iter().map(|&b| b as u32).sum::<u32>() % 256, 0);
+        }
+    }
+
 }

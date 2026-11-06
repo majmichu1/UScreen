@@ -3710,6 +3710,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "x11rb",
  "zbus 4.4.0",
 ]
 
