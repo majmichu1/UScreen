@@ -3,7 +3,10 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
-## Unreleased
+## 1.2.14 — 2026-11-06
+
+Out on a Friday instead of the usual Saturday, because I am away this weekend.
+Computer and app both changed (touchpad mode), so update the app too.
 
 - The capture helper compares the screen with the last frame it sent before
   converting anything. KWin reports the whole output as damaged even when

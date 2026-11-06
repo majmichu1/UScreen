@@ -7,8 +7,8 @@ authors:
 repository-code: "https://github.com/majmichu1/UScreen"
 url: "https://majmichu1.github.io/UScreen/"
 license: MIT
-version: "1.2.13"
-date-released: "2026-11-04"
+version: "1.2.14"
+date-released: "2026-11-06"
 keywords:
   - linux
   - android
