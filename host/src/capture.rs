@@ -648,6 +648,7 @@ impl CaptureManager {
                 edid_fps,
                 self.config.width_mm,
                 self.config.height_mm,
+                self.config.instance,
             )?,
         };
 
