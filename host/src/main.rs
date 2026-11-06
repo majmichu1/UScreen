@@ -1560,17 +1560,24 @@ async fn adb_device_serial() -> Option<String> {
         .map(|s| s.to_string())
 }
 
+fn adb_reverse_commands(serial: &str, video_port: u16, input_port: u16) -> [tokio::process::Command; 2] {
+    // Android always connects to these device-side ports; only the host
+    // listeners change between tablet sessions (or with configured ports).
+    [(8890, video_port), (8891, input_port)].map(|(device_port, host_port)| {
+        let remote = format!("tcp:{device_port}");
+        let local = format!("tcp:{host_port}");
+        let mut command = tokio::process::Command::new("adb");
+        command.args(["-s", serial, "reverse", &remote, &local]);
+        command
+    })
+}
+
 async fn setup_adb_forwarding(serial: &str, video_port: u16, input_port: u16) -> Result<()> {
-    for port in [video_port, input_port] {
-        let arg = format!("tcp:{}", port);
-        let r = tokio::process::Command::new("adb")
-            .args(["-s", serial, "reverse", &arg, &arg])
-            .output()
-            .await?;
+    for mut command in adb_reverse_commands(serial, video_port, input_port) {
+        let r = command.output().await?;
         if !r.status.success() {
             anyhow::bail!(
-                "adb reverse {} failed: {}",
-                arg,
+                "adb reverse failed: {}",
                 String::from_utf8_lossy(&r.stderr).trim()
             );
         }
@@ -1673,6 +1680,17 @@ async fn list_displays() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adb_reverse_keeps_android_ports_fixed_for_each_host_session() {
+        for (video, input) in [(8890, 8891), (8892, 8893), (8894, 8895), (9000, 9001)] {
+            let commands = adb_reverse_commands("test-tablet", video, input);
+            for (command, device, host) in [(&commands[0], 8890, video), (&commands[1], 8891, input)] {
+                let args: Vec<_> = command.as_std().get_args().map(|a| a.to_str().unwrap()).collect();
+                assert_eq!(args, ["-s", "test-tablet", "reverse", &format!("tcp:{device}"), &format!("tcp:{host}")]);
+            }
+        }
+    }
 
     #[test]
     fn tells_network_serials_from_usb_ones() {
