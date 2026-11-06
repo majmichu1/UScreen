@@ -50,6 +50,7 @@ class VideoReceiver {
     private var inputStream: InputStream? = null
     private var mediaCodec: MediaCodec? = null
     private var outputThread: Thread? = null
+    private val failedCodec = AtomicReference<MediaCodec?>(null)
     @Volatile private var isRunning = false
     @Volatile private var codecAlive = false
 
@@ -371,16 +372,27 @@ class VideoReceiver {
                     } else if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                         Log.i(TAG, "Decoder output format: ${codec.outputFormat}")
                     }
-                } catch (e: IllegalStateException) {
-                    if (codecAlive) Log.w(TAG, "Output thread: codec gone", e)
-                    break
                 } catch (e: Exception) {
-                    if (codecAlive) Log.w(TAG, "Output thread error", e)
+                    failCodec(codec, e)
+                    break
                 }
             }
         }, "uscreen-render").apply {
             priority = Thread.MAX_PRIORITY
             start()
+        }
+    }
+
+    private fun failCodec(codec: MediaCodec, error: Exception) {
+        synchronized(this) {
+            // A surface teardown or an old render thread must not invalidate
+            // the replacement decoder or close its new connection.
+            if (!codecAlive || mediaCodec !== codec) return
+            Log.w(TAG, "Decoder failed; reconnecting at the next fallback tier", error)
+            failedCodec.set(codec)
+            // Wake the receive coroutine. It owns recovery so the render
+            // thread never tries to join itself in releaseCodec().
+            try { socket?.close() } catch (_: Exception) {}
         }
     }
 
@@ -420,6 +432,13 @@ class VideoReceiver {
 
                 // Ensure codec is set up
                 val codecReady = synchronized(this@VideoReceiver) {
+                    val failed = failedCodec.getAndSet(null)
+                    if (failed != null && mediaCodec === failed) {
+                        if (decoderTier < 2) decoderTier++
+                        outputStalls = 0
+                        outputsSinceStall = 0
+                        releaseCodec()
+                    }
                     if (mediaCodec == null) {
                         val surface = pendingSurface.get()
                         if (surface != null && surface.isValid) {
@@ -624,9 +643,10 @@ class VideoReceiver {
                     return
                 }
             }
-        } catch (e: MediaCodec.CodecException) {
-            Log.e(TAG, "Decoder codec error: ${e.diagnosticInfo}", e)
-            resetCodec()
+        } catch (e: IllegalStateException) {
+            // CodecException is an IllegalStateException too. Some vendors
+            // report a fatal native error as a plain released-state exception.
+            failCodec(codec, e)
         } catch (e: Exception) {
             Log.w(TAG, "Decoder feed error", e)
         }
