@@ -18,6 +18,14 @@ Full notes for each version are on the
   tablet side is now fixed at 8890/8891 and only the host port changes. The
   same goes for a custom `video_port` / `input_port`
   ([#52](https://github.com/majmichu1/UScreen/pull/52) by H234598).
+- App: a fatal error in the decoder's output thread used to end rendering while
+  the receiver kept waiting on its connection, so the picture froze with the
+  socket still open. The receiver is now woken, moves to the next decoder
+  fallback tier and rebuilds the decoder. An old render thread can no longer
+  close a newer connection. Checked on the tablet with the new
+  `DecoderFailureCheck` (run by `scripts/check-pending-config.sh`) and a normal
+  stream with a daemon restart in between
+  ([#53](https://github.com/majmichu1/UScreen/pull/53) by H234598).
 
 ## 1.2.14 — 2026-11-06
 
