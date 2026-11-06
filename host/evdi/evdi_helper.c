@@ -29,6 +29,10 @@ static int g_fps = 60;
 
 /* EVDI-registered framebuffer (stride-padded, written by the kernel) */
 static unsigned char *g_framebuffer = NULL;
+/* Last converted source. Conversion workers snapshot disjoint source bands;
+   capture compares only after they join. Damage need not mean changed pixels. */
+static unsigned char *g_reference_frame = NULL;
+static int g_reference_valid = 0;
 static int g_fb_size = 0;
 static int g_mode_w = 0;
 static int g_mode_h = 0;
@@ -228,6 +232,15 @@ static inline int row_is_dirty(const unsigned char *mask, int cy) {
     return mask == NULL || (mask[cy >> 3] & (1u << (cy & 7)));
 }
 
+static inline void snapshot_source_rows(const conv_job_t *j, int cy) {
+    if (!g_reference_frame || g_mode_bpp != 4) return;
+    int y0 = cy * 2 * j->scale, rows = 2 * j->scale;
+    if (y0 >= j->h) return;
+    if (rows > j->h - y0) rows = j->h - y0;
+    size_t offset = (size_t)y0 * j->stride;
+    memcpy(g_reference_frame + offset, j->src + offset, (size_t)rows * j->stride);
+}
+
 /* Downscaling variant: every output pixel is the mean of a scale x scale
    source block, and each chroma sample the mean of the 2*scale square it
    covers. Box averaging rather than point sampling — dropping pixels would
@@ -268,7 +281,7 @@ static inline int swar_channel(uint32_t e, uint32_t o, int byte) {
 #define MEAN_MAX_OW 4096
 static inline void scaled_row_means(const unsigned char *src, int stride, int ow,
                                     int n, int src_y0, int ob, int og, int or_,
-                                    int *acc) {
+                                    unsigned char *acc) {
     uint32_t e[MEAN_MAX_OW], o[MEAN_MAX_OW];
     memset(e, 0, (size_t)ow * sizeof(uint32_t));
     memset(o, 0, (size_t)ow * sizeof(uint32_t));
@@ -282,38 +295,72 @@ static inline void scaled_row_means(const unsigned char *src, int stride, int ow
     switch (n) {
     case 2:
         for (int ox = 0; ox < ow; ox++) {
-            acc[ox*3]   = swar_channel(e[ox], o[ox], ob) / 4;
-            acc[ox*3+1] = swar_channel(e[ox], o[ox], og) / 4;
-            acc[ox*3+2] = swar_channel(e[ox], o[ox], or_) / 4;
+            acc[ox*4]   = swar_channel(e[ox], o[ox], ob) / 4;
+            acc[ox*4+1] = swar_channel(e[ox], o[ox], og) / 4;
+            acc[ox*4+2] = swar_channel(e[ox], o[ox], or_) / 4;
+            acc[ox*4+3] = 0;
         }
         break;
     case 3:
         for (int ox = 0; ox < ow; ox++) {
-            acc[ox*3]   = swar_channel(e[ox], o[ox], ob) / 9;
-            acc[ox*3+1] = swar_channel(e[ox], o[ox], og) / 9;
-            acc[ox*3+2] = swar_channel(e[ox], o[ox], or_) / 9;
+            acc[ox*4]   = swar_channel(e[ox], o[ox], ob) / 9;
+            acc[ox*4+1] = swar_channel(e[ox], o[ox], og) / 9;
+            acc[ox*4+2] = swar_channel(e[ox], o[ox], or_) / 9;
+            acc[ox*4+3] = 0;
         }
         break;
     case 4:
         for (int ox = 0; ox < ow; ox++) {
-            acc[ox*3]   = swar_channel(e[ox], o[ox], ob) / 16;
-            acc[ox*3+1] = swar_channel(e[ox], o[ox], og) / 16;
-            acc[ox*3+2] = swar_channel(e[ox], o[ox], or_) / 16;
+            acc[ox*4]   = swar_channel(e[ox], o[ox], ob) / 16;
+            acc[ox*4+1] = swar_channel(e[ox], o[ox], og) / 16;
+            acc[ox*4+2] = swar_channel(e[ox], o[ox], or_) / 16;
+            acc[ox*4+3] = 0;
         }
         break;
     default:
         for (int ox = 0; ox < ow; ox++) {
-            acc[ox*3]   = swar_channel(e[ox], o[ox], ob) / inv;
-            acc[ox*3+1] = swar_channel(e[ox], o[ox], og) / inv;
-            acc[ox*3+2] = swar_channel(e[ox], o[ox], or_) / inv;
+            acc[ox*4]   = swar_channel(e[ox], o[ox], ob) / inv;
+            acc[ox*4+1] = swar_channel(e[ox], o[ox], og) / inv;
+            acc[ox*4+2] = swar_channel(e[ox], o[ox], or_) / inv;
+            acc[ox*4+3] = 0;
         }
     }
 }
 
-/* Per-thread scratch for two output rows of means: 3 channels x up to 4096
-   output pixels (8192 wide at scale 2). */
-static __thread int t_mean0[MEAN_MAX_OW * 3];
-static __thread int t_mean1[MEAN_MAX_OW * 3];
+/* Means are 0..255. Packed B,G,R,0 rows reuse the native conversion and need
+   one third of the scratch space of three int channels per pixel. */
+static __thread unsigned char t_mean0[MEAN_MAX_OW * 4];
+static __thread unsigned char t_mean1[MEAN_MAX_OW * 4];
+
+static inline void convert_rows(const unsigned char *row0, const unsigned char *row1,
+                                unsigned char *yo0, unsigned char *yo1,
+                                unsigned char *uv, int w, int or_, int og, int ob) {
+    /* Source and NV12 planes never overlap; iterations own disjoint pixels. */
+    #pragma GCC ivdep
+    for (int x = 0; x < w; x += 2) {
+        const unsigned char *p;
+        int b, g, r, sb, sg, sr;
+        p = row0 + (size_t)x * 4;       b = p[ob]; g = p[og]; r = p[or_];
+        yo0[x]   = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
+        sb = b; sg = g; sr = r;
+        p = row0 + (size_t)(x+1) * 4;   b = p[ob]; g = p[og]; r = p[or_];
+        yo0[x+1] = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
+        sb += b; sg += g; sr += r;
+        p = row1 + (size_t)x * 4;       b = p[ob]; g = p[og]; r = p[or_];
+        yo1[x]   = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
+        sb += b; sg += g; sr += r;
+        p = row1 + (size_t)(x+1) * 4;   b = p[ob]; g = p[og]; r = p[or_];
+        yo1[x+1] = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
+        sb += b; sg += g; sr += r;
+        int ar = sr >> 2, ag = sg >> 2, ab = sb >> 2;
+        int cb = (((-25*ar - 87*ag + 112*ab + 128) >> 8) + 128);
+        int cr = (((112*ar - 102*ag - 10*ab + 128) >> 8) + 128);
+        if (cb < 0) cb = 0; else if (cb > 255) cb = 255;
+        if (cr < 0) cr = 0; else if (cr > 255) cr = 255;
+        uv[x]   = (unsigned char)cb;
+        uv[x+1] = (unsigned char)cr;
+    }
+}
 
 static inline void convert_strip_scaled(const conv_job_t *j) {
     const int n = j->scale, stride = j->stride, ow = j->ow;
@@ -322,29 +369,14 @@ static inline void convert_strip_scaled(const conv_job_t *j) {
     for (int cy = j->cy0; cy < j->cy1; cy++) {
         if (!row_is_dirty(j->dirty, cy))
             continue;
+        snapshot_source_rows(j, cy);
         unsigned char *yo0 = j->ydst + (size_t)(cy * 2) * ow;
         unsigned char *yo1 = yo0 + ow;
         unsigned char *uv  = j->uvdst + (size_t)cy * ow;
         /* The two output luma rows this chroma row covers. */
         scaled_row_means(j->src, stride, ow, n, (cy * 2) * n, ob, og, or_, t_mean0);
         scaled_row_means(j->src, stride, ow, n, (cy * 2 + 1) * n, ob, og, or_, t_mean1);
-        for (int ox = 0; ox < ow; ox += 2) {
-            const int *m00 = t_mean0 + ox * 3, *m01 = t_mean0 + (ox + 1) * 3;
-            const int *m10 = t_mean1 + ox * 3, *m11 = t_mean1 + (ox + 1) * 3;
-            yo0[ox]     = (unsigned char)(((47 * m00[2] + 157 * m00[1] + 16 * m00[0] + 128) >> 8) + 16);
-            yo0[ox + 1] = (unsigned char)(((47 * m01[2] + 157 * m01[1] + 16 * m01[0] + 128) >> 8) + 16);
-            yo1[ox]     = (unsigned char)(((47 * m10[2] + 157 * m10[1] + 16 * m10[0] + 128) >> 8) + 16);
-            yo1[ox + 1] = (unsigned char)(((47 * m11[2] + 157 * m11[1] + 16 * m11[0] + 128) >> 8) + 16);
-            int ab = (m00[0] + m01[0] + m10[0] + m11[0]) >> 2;
-            int ag = (m00[1] + m01[1] + m10[1] + m11[1]) >> 2;
-            int ar = (m00[2] + m01[2] + m10[2] + m11[2]) >> 2;
-            int cb = (((-25 * ar - 87 * ag + 112 * ab + 128) >> 8) + 128);
-            int cr = (((112 * ar - 102 * ag - 10 * ab + 128) >> 8) + 128);
-            if (cb < 0) cb = 0; else if (cb > 255) cb = 255;
-            if (cr < 0) cr = 0; else if (cr > 255) cr = 255;
-            uv[ox]     = (unsigned char)cb;
-            uv[ox + 1] = (unsigned char)cr;
-        }
+        convert_rows(t_mean0, t_mean1, yo0, yo1, uv, ow, 2, 1, 0);
     }
 }
 
@@ -354,35 +386,14 @@ static inline void convert_strip(const conv_job_t *j) {
     for (int cy = j->cy0; cy < j->cy1; cy++) {
         if (!row_is_dirty(j->dirty, cy))
             continue;
+        snapshot_source_rows(j, cy);
         int y0 = cy * 2, y1 = y0 + 1;
         const unsigned char *row0 = j->src + (size_t)y0 * stride;
         const unsigned char *row1 = j->src + (size_t)y1 * stride;
         unsigned char *yo0 = j->ydst + (size_t)y0 * w;
         unsigned char *yo1 = j->ydst + (size_t)y1 * w;
         unsigned char *uv  = j->uvdst + (size_t)cy * w;
-        for (int x = 0; x < w; x += 2) {
-            const unsigned char *p;
-            int b, g, r, sb, sg, sr;
-            p = row0 + (size_t)x * 4;       b = p[ob]; g = p[og]; r = p[or_];
-            yo0[x]   = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
-            sb = b; sg = g; sr = r;
-            p = row0 + (size_t)(x+1) * 4;   b = p[ob]; g = p[og]; r = p[or_];
-            yo0[x+1] = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
-            sb += b; sg += g; sr += r;
-            p = row1 + (size_t)x * 4;       b = p[ob]; g = p[og]; r = p[or_];
-            yo1[x]   = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
-            sb += b; sg += g; sr += r;
-            p = row1 + (size_t)(x+1) * 4;   b = p[ob]; g = p[og]; r = p[or_];
-            yo1[x+1] = (unsigned char)(((47*r + 157*g + 16*b + 128) >> 8) + 16);
-            sb += b; sg += g; sr += r;
-            int ar = sr >> 2, ag = sg >> 2, ab = sb >> 2;  /* 2x2 chroma average */
-            int cb = (((-25*ar - 87*ag + 112*ab + 128) >> 8) + 128);
-            int cr = (((112*ar - 102*ag - 10*ab + 128) >> 8) + 128);
-            if (cb < 0) cb = 0; else if (cb > 255) cb = 255;
-            if (cr < 0) cr = 0; else if (cr > 255) cr = 255;
-            uv[x]   = (unsigned char)cb;
-            uv[x+1] = (unsigned char)cr;
-        }
+        convert_rows(row0, row1, yo0, yo1, uv, w, or_, og, ob);
     }
 }
 
@@ -487,14 +498,78 @@ static void mark_damage(const struct evdi_rect *rects, int n) {
     }
 }
 
+/* Compare RGB exactly, ignoring stride padding and the channel the converter
+   does not read. Keep grabbing/acknowledging EVDI updates even when this says
+   nothing changed: delaying those grabs can stall compositor progress. */
+static inline int rgb_row_changed(const u32a *src, const u32a *ref,
+                                   int width, uint32_t mask) {
+    if (width > 0 && ((src[0] ^ ref[0]) & mask)) return 1;
+    int x = 0;
+    for (; x + 16 <= width; x += 16) {
+        uint32_t difference = 0;
+        for (int i = 0; i < 16; i++) difference |= src[x + i] ^ ref[x + i];
+        if (difference & mask) return 1;
+    }
+    for (; x < width; x++)
+        if ((src[x] ^ ref[x]) & mask) return 1;
+    return 0;
+}
+
+static int framebuffer_changed(void) {
+    if (!g_reference_frame || g_mode_bpp != 4)
+        return 1;  /* allocation failure/unsupported layout: keep streaming */
+
+    if (!g_reference_valid) return 1;
+
+    unsigned char channels[4] = {0};
+    channels[g_off_r] = channels[g_off_g] = channels[g_off_b] = 0xff;
+    uint32_t mask;
+    memcpy(&mask, channels, sizeof(mask));
+    unsigned char changed_rows[g_dirty_bytes];
+    memset(changed_rows, 0, (size_t)g_dirty_bytes);
+    int changed = 0;
+    int width = g_scale == 1 ? g_mode_w : g_out_w * g_scale;
+    if (width > g_mode_w) width = g_mode_w;
+    for (int cy = 0; cy < g_chroma_rows; cy++) {
+        int y0 = cy * 2 * g_scale, y1 = y0 + 2 * g_scale;
+        if (y1 > g_mode_h) y1 = g_mode_h;
+        int row_changed = 0;
+        for (int y = y0; y < y1 && !row_changed; y++) {
+            const u32a *src = (const u32a *)(g_framebuffer + (size_t)y * g_mode_stride);
+            const u32a *ref = (const u32a *)(g_reference_frame + (size_t)y * g_mode_stride);
+            if (memcmp(src, ref, (size_t)width * 4) == 0)
+                continue;
+            row_changed = rgb_row_changed(src, ref, width, mask);
+        }
+        if (!row_changed) continue;
+        changed = 1;
+        changed_rows[cy >> 3] |= (unsigned char)(1u << (cy & 7));
+    }
+    if (!changed) return 0;
+
+    /* Preserve each triple buffer's older outstanding rows; add only real new
+       changes, not the compositor's possibly full-output damage hint. */
+    pthread_mutex_lock(&g_swap_mutex);
+    for (int i = 0; i < g_dirty_bytes; i++) {
+        g_dirty_fill[i]   |= changed_rows[i];
+        g_dirty_latest[i] |= changed_rows[i];
+        g_dirty_write[i]  |= changed_rows[i];
+    }
+    pthread_mutex_unlock(&g_swap_mutex);
+    return 1;
+}
+
 /* Convert the stride-padded BGRA framebuffer into the NV12 fill buffer and
    publish it as the latest frame. Called from the event-loop thread. */
 static void publish_frame(void) {
     if (!g_buffers_ready || !g_framebuffer)
         return;
+    if (!framebuffer_changed())
+        return;  /* writer retains the last frame and its normal idle keepalive */
 
     /* Only the rows this particular buffer is missing. */
     bgra_to_nv12(g_framebuffer, g_fill, g_dirty_fill);
+    g_reference_valid = g_reference_frame && g_mode_bpp == 4;
     memset(g_dirty_fill, 0, (size_t)g_dirty_bytes);
 
     pthread_mutex_lock(&g_swap_mutex);
@@ -525,6 +600,7 @@ static void on_mode_changed(struct evdi_mode mode, void *user_data) {
        format without changing the size. Conversions are not running during a
        mode event, so the next frame simply uses the new order. */
     set_pixel_order(mode.pixel_format);
+    g_reference_valid = 0;
     mark_all_dirty();
 
     int new_w = mode.width;
@@ -579,6 +655,8 @@ static void on_mode_changed(struct evdi_mode mode, void *user_data) {
     }
 
     free(g_framebuffer);
+    free(g_reference_frame);
+    g_reference_frame = malloc((size_t)g_fb_size);
     /* The kernel copies the damaged part of the scanout buffer into this
        on every grab — the whole 22 MB when the compositor reports full
        damage, which KWin does for this output. That copy is a large share
@@ -670,12 +748,14 @@ static void grab_now(void) {
            when it takes a frame, so touching them unlocked would race.
            If the driver returned more rectangles than we gave it room for,
            we cannot know what else changed — repaint everything. */
-        pthread_mutex_lock(&g_swap_mutex);
-        if (num_rects >= (int)(sizeof(rects) / sizeof(rects[0])))
-            mark_all_dirty();
-        else
-            mark_damage(rects, num_rects);
-        pthread_mutex_unlock(&g_swap_mutex);
+        if (!g_reference_frame || !g_reference_valid || g_mode_bpp != 4) {
+            pthread_mutex_lock(&g_swap_mutex);
+            if (num_rects >= (int)(sizeof(rects) / sizeof(rects[0])))
+                mark_all_dirty();
+            else
+                mark_damage(rects, num_rects);
+            pthread_mutex_unlock(&g_swap_mutex);
+        }
         publish_frame();
     }
 }
@@ -1214,6 +1294,7 @@ int main(int argc, char *argv[]) {
     if (writer) pthread_join(writer, NULL);
     if (g_capture_fifo_fd >= 0) close(g_capture_fifo_fd);
     free(g_framebuffer);
+    free(g_reference_frame);
     free(g_fill);
     free(g_latest);
     free(g_write);
