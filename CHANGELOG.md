@@ -5,6 +5,17 @@ Full notes for each version are on the
 
 ## Unreleased
 
+- The capture helper compares the screen with the last frame it sent before
+  converting anything. KWin reports the whole output as damaged even when
+  nothing on the tablet's screen changed (activity on a physical monitor is
+  enough), and every such update used to be converted, encoded and sent. Now
+  only rows whose colour really changed are converted, and an identical frame
+  is not published at all; the idle keepalive still runs. The comparison costs
+  about 2 ms per grab at 2960x1848 when the whole screen changes, and saves
+  5 ms or more per grab otherwise (measured on a mocked grab, one conversion
+  thread; with the thread pool it adds about 1 ms when everything changes).
+  New `host/evdi/evdi_idle_test.c` covers it
+  ([#49](https://github.com/majmichu1/UScreen/pull/49) by H234598).
 - The capture helper no longer grabs pixels or re-requests an update while the
   screen is still. On an idle desktop that produced a stream of EVDI kernel
   warnings ("Update ready not sent, but pixels are grabbed", "Update was already

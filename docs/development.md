@@ -29,6 +29,8 @@ RUST_LOG=uscreen=debug uscreen start      # in a terminal, with the tablet attac
 cargo test --release --manifest-path host/Cargo.toml
 cargo clippy --release --manifest-path host/Cargo.toml
 cd android && ./gradlew lintDebug
+cc -O2 -Ihost/evdi -o /tmp/evdi_idle_test host/evdi/evdi_idle_test.c -levdi -lpthread \
+  && /tmp/evdi_idle_test && /tmp/evdi_idle_test pool    # capture helper, no tablet needed
 ```
 
 `scripts/fake-tablet.py` pretends to be a tablet on the loopback ports
