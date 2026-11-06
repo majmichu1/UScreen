@@ -35,6 +35,15 @@ Full notes for each version are on the
   benchmark, so it should not cost latency. Tested on the tablet: idle, real
   redraws and no EVDI kernel warnings
   ([#55](https://github.com/majmichu1/UScreen/pull/55) by H234598).
+- Linux Mint Cinnamon (X11): the pen and touch devices of each tablet are mapped
+  with Cinnamon's own per-device setting as well as XInput, because Muffin
+  could overwrite a plain XInput transform. Two tablets with identical screens
+  now get distinct EDID serials per session slot, the X11 output is matched by
+  connector as well as EDID, and mapping follows RandR changes through one
+  subscription instead of waiting for the next event. Only active on X11 and
+  Cinnamon. I could not try it on Cinnamon: on KDE Wayland nothing changes
+  (checked on the tablet: mapping, picture and screen size as before)
+  ([#54](https://github.com/majmichu1/UScreen/pull/54) by H234598).
 
 ## 1.2.14 — 2026-11-06
 
