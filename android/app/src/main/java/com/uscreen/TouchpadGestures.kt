@@ -22,7 +22,7 @@ import kotlin.math.hypot
 internal class TouchpadGestures(
     private val out: Output,
     /** Pointer speed: pixels of finger travel to pixels sent to the computer. */
-    var gain: Float = 1.6f,
+    var gain: Float = DEFAULT_GAIN,
     /** Content follows the fingers, as on a phone. */
     var naturalScroll: Boolean = true,
 ) {
@@ -161,6 +161,7 @@ internal class TouchpadGestures(
 
     companion object {
         /** Travel before a touch counts as movement and not a tap. */
+        const val DEFAULT_GAIN = 1.6f
         const val SLOP_PX = 12f
         const val TAP_MS = 250L
         const val DOUBLE_TAP_MS = 300L

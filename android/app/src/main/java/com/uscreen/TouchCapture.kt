@@ -671,6 +671,11 @@ class TouchCapture {
         }
     })
 
+    /** Pointer speed in percent of the default; 100 keeps the original feel. */
+    fun setTouchpadSpeed(percent: Int) {
+        pad.gain = TouchpadGestures.DEFAULT_GAIN * percent.coerceIn(25, 300) / 100f
+    }
+
     fun setTouchpadMode(on: Boolean) {
         if (touchpadMode == on) return
         touchpadMode = on

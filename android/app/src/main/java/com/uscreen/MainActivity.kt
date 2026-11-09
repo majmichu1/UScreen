@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
         touchCapture = TouchCapture().also {
             it.setTouchEnabled(prefs.touchEnabled)
             it.setTouchpadMode(prefs.touchpadMode)
+            it.setTouchpadSpeed(prefs.touchpadSpeed)
         }
         applyToken(intent, restart = false)
 
@@ -418,6 +419,7 @@ fun UScreenMain(
     var showStats by remember { mutableStateOf(prefs?.showStats ?: false) }
     var touchOn by remember { mutableStateOf(prefs?.touchEnabled ?: true) }
     var touchpadOn by remember { mutableStateOf(prefs?.touchpadMode ?: false) }
+    var touchpadSpeedPct by remember { mutableStateOf(prefs?.touchpadSpeed ?: 100) }
     var blankInPenMode by remember { mutableStateOf(prefs?.blankPenOnly ?: true) }
     var orientationChoice by remember { mutableStateOf(prefs?.orientation ?: Prefs.ORIENTATION_AUTO) }
 
@@ -626,6 +628,12 @@ fun UScreenMain(
                 },
                 touchEnabled = touchOn,
                 touchpadMode = touchpadOn,
+                touchpadSpeed = touchpadSpeedPct,
+                onTouchpadSpeedChange = {
+                    touchpadSpeedPct = it
+                    prefs?.touchpadSpeed = it
+                    touchCapture?.setTouchpadSpeed(it)
+                },
                 onTouchpadModeChange = {
                     touchpadOn = it
                     prefs?.touchpadMode = it
@@ -782,6 +790,8 @@ private fun SettingsSheet(
     onBlankPenOnlyChange: (Boolean) -> Unit,
     touchEnabled: Boolean,
     touchpadMode: Boolean,
+    touchpadSpeed: Int,
+    onTouchpadSpeedChange: (Int) -> Unit,
     onTouchpadModeChange: (Boolean) -> Unit,
     onTouchEnabledChange: (Boolean) -> Unit,
     orientation: Int,
@@ -1040,6 +1050,20 @@ private fun SettingsSheet(
                     onCheckedChange = onTouchpadModeChange,
                     enabled = touchEnabled,
                     colors = SwitchDefaults.colors(checkedTrackColor = Accent)
+                )
+            }
+            if (touchpadMode) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Touchpad speed: $touchpadSpeed%",
+                    fontSize = 14.sp,
+                    color = Color(0xFFB0B0C0)
+                )
+                Slider(
+                    value = touchpadSpeed.toFloat(),
+                    onValueChange = { onTouchpadSpeedChange((it / 5f).roundToInt() * 5) },
+                    valueRange = 25f..300f,
+                    colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent)
                 )
             }
             Spacer(Modifier.height(24.dp))

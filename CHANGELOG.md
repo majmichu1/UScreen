@@ -5,6 +5,8 @@ Full notes for each version are on the
 
 ## Unreleased
 
+- Touchpad mode has a speed setting, 25% to 300% with 100% as before, in the tablet's settings once touchpad mode is on ([#40](https://github.com/majmichu1/UScreen/issues/40), suggested by M3LAR).
+
 - One tablet reachable over both USB and Wi-Fi is now one tablet. With `max_tablets` above 1 the second adb entry used to get a pipeline of its own: two helpers on one tablet and a black screen ([#31](https://github.com/majmichu1/UScreen/issues/31)). New `adb_transport` setting (`auto`, `usb`, `wifi`, also in the settings window) to use only one of the two.
 
 - The generated EDID stored the physical size of the screen in the wrong bytes

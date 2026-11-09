@@ -61,6 +61,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("touch_enabled", true)
         set(v) = sp.edit().putBoolean("touch_enabled", v).apply()
 
+    /** Touchpad pointer speed in percent; 100 is the original speed. */
+    var touchpadSpeed: Int
+        get() = sp.getInt("touchpad_speed", 100).coerceIn(25, 300)
+        set(v) = sp.edit().putInt("touchpad_speed", v.coerceIn(25, 300)).apply()
+
     /** Fingers act as a laptop touchpad for the computer's pointer. */
     var touchpadMode: Boolean
         get() = sp.getBoolean("touchpad_mode", false)
