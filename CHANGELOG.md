@@ -5,6 +5,8 @@ Full notes for each version are on the
 
 ## Unreleased
 
+- One tablet reachable over both USB and Wi-Fi is now one tablet. With `max_tablets` above 1 the second adb entry used to get a pipeline of its own: two helpers on one tablet and a black screen ([#31](https://github.com/majmichu1/UScreen/issues/31)). New `adb_transport` setting (`auto`, `usb`, `wifi`, also in the settings window) to use only one of the two.
+
 - The generated EDID stored the physical size of the screen in the wrong bytes
   of its detailed timing, so a 314 x 195 mm tablet decoded as 3130 x 784 mm in
   anything that reads that block instead of the basic one. Fixed, and the EDID

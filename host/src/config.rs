@@ -121,6 +121,11 @@ pub struct FileConfig {
     /// reconnect to it by itself, so the tablet comes back as a screen
     /// without anyone typing an adb command. Empty disables that.
     pub wifi_address: String,
+    /// Which adb connection to drive a tablet over: `"auto"` (USB when the
+    /// cable is in, otherwise Wi-Fi), `"usb"` (never Wi-Fi) or `"wifi"`
+    /// (never USB). One tablet that is reachable both ways counts once
+    /// either way.
+    pub adb_transport: String,
     /// The DRM render node VAAPI encodes on, e.g. `/dev/dri/renderD129`.
     /// Empty picks the first node that really encodes a frame: on a laptop
     /// with two GPUs `renderD128` is whichever driver loaded first, and when
@@ -164,6 +169,7 @@ impl Default for FileConfig {
             check_updates: true,
             max_tablets: 1,
             wifi_address: String::new(),
+            adb_transport: "auto".into(),
             vaapi_device: String::new(),
             tablets: std::collections::HashMap::new(),
             pointer_handoff: true,
@@ -245,6 +251,13 @@ impl FileConfig {
         self.quality = self.quality.clamp(MIN_QUALITY, MAX_QUALITY);
         self.stream_scale = self.stream_scale.clamp(1, 4);
         self.max_tablets = self.max_tablets.clamp(1, 4);
+        if !matches!(self.adb_transport.as_str(), "auto" | "usb" | "wifi") {
+            tracing::warn!(
+                "Unknown adb_transport {:?} — falling back to \"auto\"",
+                self.adb_transport
+            );
+            self.adb_transport = "auto".into();
+        }
         self.width = self.width.clamp(640, 8192);
         self.height = self.height.clamp(480, 8192);
 

@@ -33,6 +33,8 @@ struct FileConfig {
     /// setup on every save.
     wifi_address: String,
     /// Mirrors the daemon's field; see the rule above about unknown fields.
+    adb_transport: String,
+    /// Mirrors the daemon's field; see the rule above about unknown fields.
     vaapi_device: String,
     /// Per-tablet profiles. The GUI does not edit them, but it rewrites the
     /// whole file, so a field it does not know is a field it deletes.
@@ -63,6 +65,7 @@ impl Default for FileConfig {
             check_updates: true,
             max_tablets: 1,
             wifi_address: String::new(),
+            adb_transport: "auto".into(),
             vaapi_device: String::new(),
             tablets: toml::value::Table::new(),
             pointer_handoff: true,
@@ -756,6 +759,29 @@ impl eframe::App for App {
                         ui.label(egui::RichText::new(
                             "Each tablet becomes its own screen. Needs that many EVDI devices \
                              (see uscreen doctor); the installer prepares two.").small().weak());
+                    });
+                    ui.end_row();
+
+                    ui.label("Connection");
+                    ui.vertical(|ui| {
+                        egui::ComboBox::from_id_salt("adb_transport")
+                            .selected_text(match self.cfg.adb_transport.as_str() {
+                                "usb" => "USB only",
+                                "wifi" => "Wi-Fi only",
+                                _ => "Automatic (USB first)",
+                            })
+                            .show_ui(ui, |ui| {
+                                for (v, label) in [
+                                    ("auto", "Automatic (USB first)"),
+                                    ("usb", "USB only"),
+                                    ("wifi", "Wi-Fi only"),
+                                ] {
+                                    ui.selectable_value(&mut self.cfg.adb_transport, v.to_string(), label);
+                                }
+                            });
+                        ui.label(egui::RichText::new(
+                            "Which adb link the tablet is driven over. Applies on the next start.")
+                            .small().weak());
                     });
                     ui.end_row();
 

@@ -538,9 +538,10 @@ async fn run_daemon(cli: Cli) -> Result<()> {
         shutdown_rx: shutdown_tx.subscribe(),
     };
     let wifi_address = file_cfg.wifi_address.clone();
+    let adb_transport = file_cfg.adb_transport.clone();
     let settings_tx_adb = settings_tx.clone();
     let adb_handle = tokio::spawn(async move {
-        adb_monitor(video_port, input_port, auto_launch, tablet_tx, adb_token, relaunch, extra, wifi_address, settings_tx_adb, serial_tx).await;
+        adb_monitor(video_port, input_port, auto_launch, tablet_tx, adb_token, relaunch, extra, wifi_address, adb_transport, settings_tx_adb, serial_tx).await;
     });
 
     println!();
@@ -928,6 +929,8 @@ async fn adb_monitor(
     extra: ExtraSessionTemplate,
     // `ip:port` remembered by `uscreen wifi`, or empty.
     wifi_address: String,
+    // `auto`, `usb` or `wifi`; see `select_devices`.
+    adb_transport: String,
     settings_tx: watch::Sender<capture::EncoderSettings>,
     serial_tx: watch::Sender<Option<String>>,
 ) {
@@ -960,6 +963,9 @@ async fn adb_monitor(
         error!("adb is not installed — the tablet can never be found. Install android-tools (or adb) and restart.");
     }
 
+    // Hardware serial of each network device, asked once per address.
+    let mut hardware_ids: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
     loop {
         let mut devices = adb_devices().await;
         // Test hook: pretend a serial is attached so a second pipeline can be
@@ -971,6 +977,7 @@ async fn adb_monitor(
                 }
             }
         }
+        devices = select_devices(devices, &adb_transport, &mut hardware_ids).await;
         let found = pick_device(&devices, current.as_deref()).await;
 
         match (&current, &found) {
@@ -1110,7 +1117,7 @@ async fn adb_monitor(
                 // Wi-Fi: try to get it back. adb answers instantly when the
                 // tablet is not reachable, so this costs nothing while it is
                 // off or out of range.
-                if current.is_none() && !wifi_address.is_empty() {
+                if current.is_none() && !wifi_address.is_empty() && adb_transport != "usb" {
                     let out = tokio::process::Command::new("adb")
                         .args(["connect", &wifi_address])
                         .output()
@@ -1514,6 +1521,67 @@ async fn pick_device(devices: &[String], current: Option<&str>) -> Option<String
     devices.first().cloned()
 }
 
+/// Narrow adb's list to the devices to drive: honour `adb_transport`, then
+/// keep one entry per physical tablet.
+///
+/// A tablet with `adb tcpip` running shows up twice, as its USB serial and as
+/// `ip:port`. With `max_tablets` above 1 the second entry used to be taken for
+/// another tablet and got a pipeline of its own: two helpers on one device,
+/// one display never fed, a black screen (#31). `ro.serialno` is the same on
+/// both links, so a network entry whose hardware serial is already listed is
+/// dropped. The list arrives USB first, so USB wins in `auto`.
+async fn select_devices(
+    devices: Vec<String>,
+    transport: &str,
+    hardware_ids: &mut std::collections::HashMap<String, String>,
+) -> Vec<String> {
+    let devices = filter_by_transport(devices, transport);
+    for d in &devices {
+        if is_network_serial(d) && !is_fake_serial(d) && !hardware_ids.contains_key(d) {
+            let out = tokio::process::Command::new("adb")
+                .args(["-s", d, "shell", "getprop", "ro.serialno"])
+                .output()
+                .await;
+            if let Ok(o) = out {
+                let id = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if !id.is_empty() {
+                    hardware_ids.insert(d.clone(), id);
+                }
+            }
+        }
+    }
+    hardware_ids.retain(|k, _| devices.contains(k));
+    dedupe_by_hardware(devices, hardware_ids)
+}
+
+fn filter_by_transport(devices: Vec<String>, transport: &str) -> Vec<String> {
+    devices
+        .into_iter()
+        .filter(|d| match transport {
+            "usb" => !is_network_serial(d),
+            "wifi" => is_network_serial(d),
+            _ => true,
+        })
+        .collect()
+}
+
+/// Keep the first entry of every physical tablet. A USB serial is its own
+/// hardware serial; a network entry is looked up in `hardware_ids` and, when
+/// the lookup has not worked, stays (better two entries than a lost tablet).
+fn dedupe_by_hardware(
+    devices: Vec<String>,
+    hardware_ids: &std::collections::HashMap<String, String>,
+) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    devices
+        .into_iter()
+        .filter(|d| {
+            let id = hardware_ids.get(d).cloned().unwrap_or_else(|| d.clone());
+            seen.insert(id)
+        })
+        .collect()
+}
+
 /// Every device in state "device", USB entries first.
 async fn adb_devices() -> Vec<String> {
     let Ok(out) = tokio::process::Command::new("adb").arg("devices").output().await else {
@@ -1699,6 +1767,39 @@ mod tests {
         assert!(is_network_serial("adb-R52WA0A0KED-aBcDeF._adb-tls-pairing._tcp"));
         assert!(!is_network_serial("R52WA0A0KED"));
         assert!(!is_network_serial("emulator-5554"));
+    }
+
+    #[test]
+    fn one_tablet_over_usb_and_wifi_is_listed_once() {
+        let devices = vec!["R52W10ABCDE".to_string(), "192.168.1.20:5555".to_string()];
+        let ids = std::collections::HashMap::from([(
+            "192.168.1.20:5555".to_string(),
+            "R52W10ABCDE".to_string(),
+        )]);
+        assert_eq!(dedupe_by_hardware(devices, &ids), vec!["R52W10ABCDE".to_string()]);
+    }
+
+    #[test]
+    fn different_tablets_and_unresolved_entries_are_kept() {
+        let devices = vec![
+            "AAA".to_string(),
+            "BBB".to_string(),
+            "192.168.1.20:5555".to_string(),
+            "192.168.1.21:5555".to_string(),
+        ];
+        let ids = std::collections::HashMap::from([(
+            "192.168.1.20:5555".to_string(),
+            "CCC".to_string(),
+        )]);
+        assert_eq!(dedupe_by_hardware(devices.clone(), &ids), devices);
+    }
+
+    #[test]
+    fn transport_setting_filters_the_list() {
+        let devices = vec!["AAA".to_string(), "10.0.0.2:5555".to_string()];
+        assert_eq!(filter_by_transport(devices.clone(), "usb"), vec!["AAA".to_string()]);
+        assert_eq!(filter_by_transport(devices.clone(), "wifi"), vec!["10.0.0.2:5555".to_string()]);
+        assert_eq!(filter_by_transport(devices.clone(), "auto"), devices);
         assert_eq!(transport_of("R52WA0A0KED"), Transport::Usb);
         assert_eq!(transport_of("adb-X-y._adb-tls-connect._tcp"), Transport::Network);
     }

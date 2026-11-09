@@ -24,6 +24,7 @@ icon or CLI flags (flags win over the file). Restart the daemon, or press
 | `max_tablets` | `1` | 1–4 | How many tablets at once, each its own screen. Needs that many EVDI devices (the installer sets them). |
 | `vaapi_device` | `""` | a render node | e.g. `/dev/dri/renderD129`. Empty picks the first node that really encodes a frame. |
 | `wifi_address` | `""` | `ip:port` | Set by `uscreen wifi`; the daemon reconnects to it when the cable is out. Empty disables it. |
+| `adb_transport` | `"auto"` | `auto`, `usb`, `wifi` | Which adb connection to drive the tablet over. `auto` prefers USB and uses Wi-Fi when the cable is out; `usb` ignores Wi-Fi entirely (no reconnects either); `wifi` ignores USB. A tablet reachable both ways is one tablet in every mode. |
 | `auto_launch_app` | `true` | | Start the app on the tablet when it is plugged in. |
 | `require_token` | `true` | | The tablet must present this run's session token before it gets video or can inject input. Turn off only for an app older than 1.1.0. |
 | `check_updates` | `true` | | One HTTPS request a day to api.github.com to tell you a newer release exists. Nothing is downloaded or installed. |
