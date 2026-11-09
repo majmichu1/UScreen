@@ -24,6 +24,7 @@ please add yours.
 | Arch Linux (kernel 7.2) | KDE Plasma 6.7.5, Wayland | Intel UHD (i5-10210U), `h264_vaapi` | works on a Fire 7 (9th gen); smooth, some latency | [issue #27](https://github.com/majmichu1/UScreen/issues/27) |
 | Ubuntu 26.04.1 LTS | GNOME, Wayland | Intel UHD 620, `libx264` | works with a Galaxy Tab A9+ (1.2.7 and 1.2.8, `.deb`); touch is mapped to the tablet automatically, the pen was not tried | [issue #28](https://github.com/majmichu1/UScreen/issues/28) |
 | Fedora 44 | Cinnamon | Intel i5-1245U, `libx264` and `h264_vaapi` | works with a Lenovo Tab4 8 Plus (1.2.12, `.rpm`) | [issue #46](https://github.com/majmichu1/UScreen/issues/46) |
+| Omarchy Quarto (Arch) | Hyprland | Intel UHD (Comet Lake-U), `h264_vaapi` | works with a Galaxy Tab S7+ (1.2.14, PKGBUILD) over USB; S Pen works; capture to FIFO p50 16.5 ms | [issue #56](https://github.com/majmichu1/UScreen/issues/56) |
 
 Requirements that follow from the design:
 
