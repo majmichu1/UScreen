@@ -25,6 +25,7 @@ please add yours.
 | Ubuntu 26.04.1 LTS | GNOME, Wayland | Intel UHD 620, `libx264` | works with a Galaxy Tab A9+ (1.2.7 and 1.2.8, `.deb`); touch is mapped to the tablet automatically, the pen was not tried | [issue #28](https://github.com/majmichu1/UScreen/issues/28) |
 | Fedora 44 | Cinnamon | Intel i5-1245U, `libx264` and `h264_vaapi` | works with a Lenovo Tab4 8 Plus (1.2.12, `.rpm`) | [issue #46](https://github.com/majmichu1/UScreen/issues/46) |
 | Omarchy Quarto (Arch) | Hyprland | Intel UHD (Comet Lake-U), `h264_vaapi` | works with a Galaxy Tab S7+ (1.2.14, PKGBUILD) over USB; S Pen works; capture to FIFO p50 16.5 ms | [issue #56](https://github.com/majmichu1/UScreen/issues/56) |
+| Ultramarine 44 (Fedora 44) | KDE Plasma, Wayland | Intel Iris Xe (Alder Lake), `h264_vaapi` | works with a Galaxy Tab S10 FE (1.2.14, `.rpm`, evdi 1.15.1 built from source) over USB; pen pressure, tilt, hover and button confirmed; encode→display p50 32.9 ms | [issue #59](https://github.com/majmichu1/UScreen/issues/59) |
 
 Requirements that follow from the design:
 
@@ -40,7 +41,10 @@ Requirements that follow from the design:
 - **COSMIC** (from 1.2.8): the daemon switches the virtual output on with
   `cosmic-randr`. Not yet confirmed on real hardware, see
   [#26](https://github.com/majmichu1/UScreen/issues/26). Pen and touch
-  mapping is manual there.
+  mapping is manual there. One report (CachyOS, NVIDIA, 1.2.14,
+  [#57](https://github.com/majmichu1/UScreen/issues/57)) has the whole
+  compositor freeze as soon as the virtual output is enabled; graphics-tablet
+  mode (`pen_only = true`) works.
 - **GNOME on Wayland** and **X11 sessions other than Plasma** (Cinnamon, XFCE,
   MATE, GNOME on Xorg; from 1.2.8): the daemon maps pen and touch itself, with
   GNOME's per-device settings and with `xinput map-to-output`, and on X11 it
