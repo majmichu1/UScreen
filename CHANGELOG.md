@@ -3,7 +3,7 @@
 Full notes for each version are on the
 [releases page](https://github.com/majmichu1/UScreen/releases).
 
-## Unreleased
+## 1.2.15 — 2026-11-14
 
 - If the adb server is killed or restarted while the tablet stays plugged in (an IDE closing it, `adb kill-server`), the port forwards are put back within about ten seconds instead of leaving the tablet on "Waiting for host" until the cable is replugged ([#60](https://github.com/majmichu1/UScreen/issues/60), reported by dijimmi).
 

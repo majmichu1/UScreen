@@ -1,6 +1,6 @@
 .PHONY: all build build-helper install clean run android adb edid status stop list dist setup-system publish release-metadata
 
-VERSION = 1.2.14
+VERSION = 1.2.15
 
 CARGO = cargo
 CC = gcc
