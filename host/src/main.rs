@@ -1130,7 +1130,19 @@ async fn adb_monitor(
                         }
                     }
                 }
+                // An adb server that was killed or restarted (an IDE closing
+                // it, `adb kill-server`) takes the port forwards with it while
+                // the tablet stays attached, so nothing above notices. Put
+                // them back; the app keeps retrying and reconnects by itself.
+                for (extra_serial, sess) in extras.iter() {
+                    if !is_fake_serial(extra_serial) {
+                        restore_forwarding(extra_serial, sess.video_port, sess.input_port).await;
+                    }
+                }
                 let Some(serial) = current.as_deref() else { continue };
+                if !is_fake_serial(serial) {
+                    restore_forwarding(serial, video_port, input_port).await;
+                }
                 if !auto_launch || is_fake_serial(serial) {
                     continue;
                 }
@@ -1640,6 +1652,45 @@ fn adb_reverse_commands(serial: &str, video_port: u16, input_port: u16) -> [toki
     })
 }
 
+/// Whether `adb reverse --list` shows the tablet's fixed ports 8890 and 8891
+/// pointing at this session's listeners.
+fn reverse_present(list: &str, video_port: u16, input_port: u16) -> bool {
+    let has = |device: u16, host: u16| {
+        list.lines().any(|line| {
+            let t: Vec<&str> = line.split_whitespace().collect();
+            t.len() >= 3
+                && t[t.len() - 2] == format!("tcp:{device}")
+                && t[t.len() - 1] == format!("tcp:{host}")
+        })
+    };
+    has(8890, video_port) && has(8891, input_port)
+}
+
+/// Set the port forwards up again when they have disappeared from a tablet
+/// that is still attached. Does nothing when adb cannot answer.
+async fn restore_forwarding(serial: &str, video_port: u16, input_port: u16) {
+    let Ok(out) = tokio::process::Command::new("adb")
+        .args(["-s", serial, "reverse", "--list"])
+        .output()
+        .await
+    else {
+        return;
+    };
+    if !out.status.success() {
+        return;
+    }
+    if reverse_present(&String::from_utf8_lossy(&out.stdout), video_port, input_port) {
+        return;
+    }
+    match setup_adb_forwarding(serial, video_port, input_port).await {
+        Ok(_) => info!(
+            "ADB port forwarding on {} was gone (adb server restarted?) — set up again",
+            serial
+        ),
+        Err(e) => warn!("ADB forwarding could not be restored on {}: {}", serial, e),
+    }
+}
+
 async fn setup_adb_forwarding(serial: &str, video_port: u16, input_port: u16) -> Result<()> {
     for mut command in adb_reverse_commands(serial, video_port, input_port) {
         let r = command.output().await?;
@@ -1767,6 +1818,18 @@ mod tests {
         assert!(is_network_serial("adb-R52WA0A0KED-aBcDeF._adb-tls-pairing._tcp"));
         assert!(!is_network_serial("R52WA0A0KED"));
         assert!(!is_network_serial("emulator-5554"));
+    }
+
+    #[test]
+    fn reverse_list_is_checked_for_both_ports() {
+        let both = "UsbFfs tcp:8890 tcp:8890\nUsbFfs tcp:8891 tcp:8891\n";
+        assert!(reverse_present(both, 8890, 8891));
+        assert!(!reverse_present("", 8890, 8891));
+        assert!(!reverse_present("UsbFfs tcp:8890 tcp:8890\n", 8890, 8891));
+        // A second tablet keeps the device-side ports and moves the host side.
+        let second = "UsbFfs tcp:8890 tcp:8892\nUsbFfs tcp:8891 tcp:8893\n";
+        assert!(reverse_present(second, 8892, 8893));
+        assert!(!reverse_present(second, 8890, 8891));
     }
 
     #[test]
