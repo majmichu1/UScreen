@@ -26,6 +26,7 @@ please add yours.
 | Fedora 44 | Cinnamon | Intel i5-1245U, `libx264` and `h264_vaapi` | works with a Lenovo Tab4 8 Plus (1.2.12, `.rpm`) | [issue #46](https://github.com/majmichu1/UScreen/issues/46) |
 | Omarchy Quarto (Arch) | Hyprland | Intel UHD (Comet Lake-U), `h264_vaapi` | works with a Galaxy Tab S7+ (1.2.14, PKGBUILD) over USB; S Pen works; capture to FIFO p50 16.5 ms | [issue #56](https://github.com/majmichu1/UScreen/issues/56) |
 | Ultramarine 44 (Fedora 44) | KDE Plasma, Wayland | Intel Iris Xe (Alder Lake), `h264_vaapi` | works with a Galaxy Tab S10 FE (1.2.14, `.rpm`, evdi 1.15.1 built from source) over USB; pen pressure, tilt, hover and button confirmed; encode→display p50 32.9 ms | [issue #59](https://github.com/majmichu1/UScreen/issues/59) |
+| Ubuntu 22.04 LTS | not stated | AMD Ryzen 7 PRO, `libx264` | works with a Lenovo Tab M10 Plus (3rd gen) (1.2.15, `.deb`); the reporter set 30 fps for smooth use | [issue #62](https://github.com/majmichu1/UScreen/issues/62) |
 
 Requirements that follow from the design:
 

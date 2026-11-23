@@ -76,6 +76,22 @@ against Debian 12's glibc and run on anything since; update.
 With `max_tablets = 1` the helper picks any free EVDI card. That is fine; the
 number is not meaningful.
 
+## Hyprland: the pen is offset horizontally
+
+`hyprctl devices` lists `uscreen-pen` as a square tablet while the screen is
+wider than it is tall, and on one setup (Hyprland 0.57.2,
+[#58](https://github.com/majmichu1/UScreen/issues/58)) the pen then reached only
+part of the width. What fixed it there was a device rule that gives the pen a
+square active area, in the Lua config:
+
+```lua
+hl.device({ name = "uscreen-pen", output = "DVI-I-2", active_area_size = {310, 310} })
+```
+
+Use your own output name from `hyprctl monitors`. This comes from one report and
+I do not run Hyprland, so treat it as a workaround to try; tell me in #58 if it
+does or does not help.
+
 ## Getting more help
 
 Open an issue with the output of `uscreen doctor` and the daemon log, or ask in
