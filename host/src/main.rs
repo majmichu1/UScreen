@@ -1212,6 +1212,7 @@ async fn adb_monitor(
                 if let Some(serial) = current.as_deref() {
                     if devices.iter().any(|device| device == serial)
                         && last_relaunch.elapsed() >= relaunch_wait
+                        && (auto_launch || app_visible(serial).await == Some(true))
                     {
                         last_relaunch = std::time::Instant::now();
                         relaunches += 1;
@@ -1231,7 +1232,9 @@ async fn adb_monitor(
             _ = extra_relaunch => {
                 // Deliver the token to every extra tablet; cheap and rare.
                 for (serial, _) in extras.iter() {
-                    if devices.contains(serial) && !is_fake_serial(serial) {
+                    if devices.contains(serial) && !is_fake_serial(serial)
+                        && (auto_launch || app_visible(serial).await == Some(true))
+                    {
                         launch_app(serial, token.as_deref()).await;
                     }
                 }
@@ -1397,31 +1400,74 @@ async fn apply_tablet_profile(serial: &str, settings_tx: &watch::Sender<capture:
 }
 
 async fn app_running(serial: &str) -> Option<bool> {
-    app_available(serial, false).await
+    let (code, text) = app_query(serial, &["pidof", "com.uscreen"]).await?;
+    match code {
+        0 => Some(text.split_whitespace().any(|pid| pid.parse::<u32>().is_ok())),
+        1 if text.trim().is_empty() => Some(false),
+        _ => None,
+    }
 }
 
-/// Installed for automatic launch, running for manual use. A failed query can
+/// Installed for automatic launch, visible for manual use. A failed query can
 /// leave a previous observation intact but cannot admit a new tablet.
 async fn app_available(serial: &str, auto_launch: bool) -> Option<bool> {
-    let mut command = tokio::process::Command::new("adb");
-    command.args(["-s", serial, "shell"]).kill_on_drop(true);
-    if auto_launch {
-        command.args(["pm", "path", "com.uscreen"]);
-    } else {
-        command.args(["pidof", "com.uscreen"]);
+    if !auto_launch {
+        return app_visible(serial).await;
     }
+    let (code, text) = app_query(serial, &["pm", "path", "com.uscreen"]).await?;
+    match code {
+        0 => Some(text.lines().any(|line| line.starts_with("package:"))),
+        1 if text.trim().is_empty() => Some(false),
+        _ => None,
+    }
+}
+
+async fn app_visible(serial: &str) -> Option<bool> {
+    let (code, text) = app_query(serial, &["dumpsys", "activity", "-p", "com.uscreen", "activities"]).await?;
+    if code != 0 {
+        return None;
+    }
+    parse_app_visibility(&text)
+}
+
+/// Android can keep the process and foreground service alive after Back or
+/// Home. The Activity owns the control and video connections until onStop.
+fn parse_app_visibility(text: &str) -> Option<bool> {
+    if !text.lines().any(|line| line.starts_with("ACTIVITY MANAGER ACTIVITIES")) {
+        return None;
+    }
+    let mut observed = false;
+    let mut has_activity = false;
+    for line in text.lines().map(str::trim_start) {
+        has_activity |= line.starts_with("* Hist") && line.contains(" com.uscreen/");
+        // New Android releases distinguish requested visibility from the
+        // last composed frame. Older releases report it on the keysPaused line.
+        let visibility = if line.starts_with("mVisibleRequested=") {
+            line.split_whitespace().next()
+                .and_then(|field| field.strip_prefix("mVisibleRequested="))
+        } else if line.starts_with("keysPaused=") {
+            line.split_whitespace().find_map(|field| field.strip_prefix("visible="))
+        } else {
+            None
+        };
+        match visibility {
+            Some("true") => return Some(true),
+            Some("false") => observed = true,
+            _ => {}
+        }
+    }
+    if observed || !has_activity { Some(false) } else { None }
+}
+
+async fn app_query(serial: &str, args: &[&str]) -> Option<(i32, String)> {
+    let mut command = tokio::process::Command::new("adb");
+    command.args(["-s", serial, "shell"]).args(args).kill_on_drop(true);
     let out = tokio::time::timeout(std::time::Duration::from_secs(2), command.output())
         .await.ok()?.ok()?;
     if !out.stderr.is_empty() {
         return None;
     }
-    let text = String::from_utf8_lossy(&out.stdout);
-    match out.status.code() {
-        Some(0) if auto_launch => Some(text.lines().any(|line| line.starts_with("package:"))),
-        Some(0) => Some(text.split_whitespace().any(|pid| pid.parse::<u32>().is_ok())),
-        Some(1) if text.trim().is_empty() => Some(false),
-        _ => None,
-    }
+    Some((out.status.code()?, String::from_utf8_lossy(&out.stdout).into_owned()))
 }
 
 /// Measured on a quiet network: the median roughly doubles, but the 95th
@@ -1897,6 +1943,23 @@ mod tests {
         assert_eq!(tablets, ["left", "s5e", "right"]);
         assert_eq!(pick_device(&tablets, Some("s5e")).as_deref(), Some("s5e"));
         assert_eq!(pick_device(&tablets, None).as_deref(), Some("left"));
+    }
+
+    #[test]
+    fn manual_slots_follow_app_visibility_even_if_the_process_lives_on() {
+        let header = "ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)\n";
+        let record = "    * Hist  #0: ActivityRecord{123 u0 com.uscreen/.MainActivity t1 d0}\n";
+        for (details, expected) in [
+            ("mVisibleRequested=true mVisible=true mClientVisible=true", Some(true)),
+            ("mVisibleRequested=false mVisible=true mClientVisible=true", Some(false)),
+            ("keysPaused=false inHistory=true visible=true sleeping=false", Some(true)),
+            ("keysPaused=false inHistory=true visible=false sleeping=false", Some(false)),
+            ("state=UNKNOWN", None),
+        ] {
+            assert_eq!(parse_app_visibility(&format!("{header}{record}      {details}")), expected);
+        }
+        assert_eq!(parse_app_visibility(header), Some(false));
+        assert_eq!(parse_app_visibility("Permission Denial: cannot dump activity"), None);
     }
 
     #[test]
