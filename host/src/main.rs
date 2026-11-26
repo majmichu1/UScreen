@@ -985,6 +985,7 @@ async fn adb_monitor(
         if refresh {
             last_app_scan = std::time::Instant::now();
         }
+        let scanned = refresh || devices.iter().any(|serial| !app_states.contains_key(serial));
         let probes = devices
             .iter()
             .filter(|s| !is_fake_serial(s) && (refresh || !app_states.contains_key(*s)))
@@ -996,6 +997,7 @@ async fn adb_monitor(
                 *previous = status;
             }
         }
+        let candidates = scanned.then(|| devices.clone()).unwrap_or_default();
         devices = eligible_tablets(devices, &app_states);
         let mut found = pick_device(&devices, current.as_deref());
 
@@ -1134,6 +1136,19 @@ async fn adb_monitor(
                 extras.insert(serial, sess);
             }
         }
+
+        // A restart can assign a different tablet to a slot while ADB still
+        // forwards the previous tablet to it. Inspect only canonical devices:
+        // both transports of one tablet can share the same reverse listeners.
+        let unassigned = candidates.iter().filter(|serial| {
+            current.as_ref() != Some(*serial)
+                && !extras.contains_key(*serial)
+                && !is_fake_serial(serial)
+                && (!is_network_serial(serial) || hardware_ids.contains_key(*serial))
+        });
+        futures_util::future::join_all(unassigned.map(|serial| {
+            release_stale_forwarding(serial, video_port, input_port, extra.slot_count.max(1))
+        })).await;
 
         // Poll every two seconds, but wake at once if a client turned up
         // without the token: the app was started by hand, and launching it
@@ -1783,6 +1798,23 @@ async fn release_forwarding(serial: &str, video_port: u16, input_port: u16) -> b
         }
     }
     true
+}
+
+/// Reclaim only complete pairs targeting a slot of this daemon. Leave other
+/// users of adb reverse, including a different configured port range, alone.
+async fn release_stale_forwarding(serial: &str, video_port: u16, input_port: u16, slots: u32) {
+    let Some(list) = adb_reverse_list(serial).await else { return };
+    for slot in 0..slots {
+        // capacity() has already checked that both ports fit in u16.
+        let offset = (slot * 2) as u16;
+        let (video, input) = (video_port + offset, input_port + offset);
+        if reverse_present(&list, video, input) {
+            if release_forwarding(serial, video, input).await {
+                info!("Removed stale UScreen ADB forwarding on {}", serial);
+            }
+            break;
+        }
+    }
 }
 
 /// Set the port forwards up again when they have disappeared from a tablet
