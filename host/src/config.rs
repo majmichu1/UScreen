@@ -2,6 +2,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+#[path = "../../shared/tablet_limit.rs"]
+mod tablet_limit;
+pub use tablet_limit::TabletLimit;
+
 /// Highest bitrate the USB transport actually sustains. Beyond this the encoder
 /// outruns the link, frames pile up in every queue along the way and latency
 /// grows without bound — the stream does not get sharper, only later.
@@ -63,6 +67,21 @@ impl TabletProfile {
     }
 }
 
+impl TabletLimit {
+    pub fn capacity(self, cards: usize, video_port: u16, input_port: u16) -> u32 {
+        let port_pairs = u32::from((u16::MAX - video_port.max(input_port)) / 2) + 1;
+        let mut slots = (cards as u32).min(port_pairs);
+        if video_port % 2 == input_port % 2 {
+            // With the same parity, video and input port ranges can overlap.
+            slots = slots.min(u32::from(video_port.abs_diff(input_port) / 2).max(1));
+        }
+        match self {
+            Self::Auto => slots,
+            Self::Fixed(limit) => slots.min(limit),
+        }
+    }
+}
+
 /// Persistent settings, shared by the CLI daemon, the GUI and the tablet app
 /// (which pushes changes over the input WebSocket).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -112,10 +131,8 @@ pub struct FileConfig {
     /// installed by the daemon; updating stays with you or your package
     /// manager. One HTTPS request a day to api.github.com.
     pub check_updates: bool,
-    /// How many tablets may be attached at once, each as its own virtual
-    /// screen. Needs that many EVDI devices: the installer sets
-    /// initial_device_count to match. 1 keeps everything exactly as before.
-    pub max_tablets: u32,
+    /// "auto" uses the available EVDI devices. A number sets a fixed ceiling.
+    pub max_tablets: TabletLimit,
     /// The tablet's address on the network, as `ip:port`, remembered by
     /// `uscreen wifi`. When the cable is not plugged in the daemon tries to
     /// reconnect to it by itself, so the tablet comes back as a screen
@@ -167,7 +184,7 @@ impl Default for FileConfig {
             ten_bit: false,
             require_token: true,
             check_updates: true,
-            max_tablets: 1,
+            max_tablets: TabletLimit::Auto,
             wifi_address: String::new(),
             adb_transport: "auto".into(),
             vaapi_device: String::new(),
@@ -250,7 +267,7 @@ impl FileConfig {
 
         self.quality = self.quality.clamp(MIN_QUALITY, MAX_QUALITY);
         self.stream_scale = self.stream_scale.clamp(1, 4);
-        self.max_tablets = self.max_tablets.clamp(1, 4);
+        self.max_tablets.sanitize();
         if !matches!(self.adb_transport.as_str(), "auto" | "usb" | "wifi") {
             tracing::warn!(
                 "Unknown adb_transport {:?} — falling back to \"auto\"",
