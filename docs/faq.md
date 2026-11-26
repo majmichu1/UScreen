@@ -113,8 +113,11 @@ On the reference hardware: about 19–22 ms median end-to-end with H.264,
 15–18 ms with HEVC, over USB. The tablet's decoder is most of it.
 
 **Can I use two tablets?**
-Yes, `max_tablets` up to 4; each becomes its own screen. Verified with one
-real tablet plus a loopback stand-in — reports with two real ones welcome.
+Yes. With `max_tablets = "auto"`, UScreen assigns one screen per eligible
+tablet, up to the EVDI devices available when the daemon starts. An explicit
+number from 1 to 4 sets a lower ceiling. With app autostart enabled,
+install the app on each tablet. With autostart off, open it on each tablet
+as needed.
 
 **How do I uninstall UScreen completely?**
 The exact commands, including the system files the installer creates, are in

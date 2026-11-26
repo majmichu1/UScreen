@@ -167,8 +167,11 @@ settings from the computer.
   the explanation shows for eight seconds, then the screen goes fully black
   so an OLED panel is not left lit with the same text. Pen and touch still
   work. **Touch input** (same sheet) turns fingers off and leaves the pen.
-- **Several tablets** — `max_tablets` up to 4, each its own screen. Each is
-  remembered by its serial in a `[tablets.<serial>]` block: its panel size, so
+- **Several tablets** — `max_tablets = "auto"` uses the EVDI devices available
+  when the daemon starts. A numeric value from 1 to 4 sets a fixed ceiling.
+  A ready ADB device needs the UScreen app installed when app autostart is
+  enabled. With autostart off, open the app to claim a screen. Each tablet is
+  remembered by its serial in a `[tablets.<serial>]` block with its panel size, so
   the right display is built the moment it is plugged in, and optionally its
   own `fps`, `bitrate`, `quality`, `stream_scale` or `position`.
 - **Wi-Fi** — `uscreen wifi` once, with the cable in: it switches the tablet

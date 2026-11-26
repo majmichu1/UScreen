@@ -7,6 +7,10 @@ use std::process::Command;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
+#[path = "../../shared/tablet_limit.rs"]
+mod tablet_limit;
+use tablet_limit::TabletLimit;
+
 /// Mirror of the daemon's config file (~/.config/uscreen/config.toml).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
@@ -27,7 +31,7 @@ struct FileConfig {
     ten_bit: bool,
     require_token: bool,
     check_updates: bool,
-    max_tablets: u32,
+    max_tablets: TabletLimit,
     /// `ip:port` remembered by `uscreen wifi`. Same rule as `position`: the
     /// GUI rewrites the whole file, so leaving this out wiped the Wi-Fi
     /// setup on every save.
@@ -63,7 +67,7 @@ impl Default for FileConfig {
             ten_bit: false,
             require_token: true,
             check_updates: true,
-            max_tablets: 1,
+            max_tablets: TabletLimit::Auto,
             wifi_address: String::new(),
             adb_transport: "auto".into(),
             vaapi_device: String::new(),
@@ -105,6 +109,7 @@ impl FileConfig {
         cfg.fps = cfg.fps.clamp(MIN_FPS, MAX_FPS);
         cfg.quality = cfg.quality.clamp(MIN_QUALITY, MAX_QUALITY);
         cfg.stream_scale = cfg.stream_scale.clamp(1, 4);
+        cfg.max_tablets.sanitize();
         cfg
     }
 
@@ -753,15 +758,6 @@ impl eframe::App for App {
                     ui.checkbox(&mut self.cfg.check_updates, "Check for a newer release on start");
                     ui.end_row();
 
-                    ui.label("Tablets");
-                    ui.vertical(|ui| {
-                        ui.add(egui::Slider::new(&mut self.cfg.max_tablets, 1..=4).text("at once"));
-                        ui.label(egui::RichText::new(
-                            "Each tablet becomes its own screen. Needs that many EVDI devices \
-                             (see uscreen doctor); the installer prepares two.").small().weak());
-                    });
-                    ui.end_row();
-
                     ui.label("Connection");
                     ui.vertical(|ui| {
                         egui::ComboBox::from_id_salt("adb_transport")
@@ -906,6 +902,36 @@ impl eframe::App for App {
                             &mut self.cfg.auto_launch_app,
                             "Open the app on the tablet automatically",
                         );
+                        ui.label(egui::RichText::new(
+                            "With app auto-launch on, authorized ADB tablets with UScreen installed can get a slot. \
+                             With it off, closing the tablet app frees its slot. USB and Wi-Fi count once per tablet.")
+                            .small().weak());
+                        ui.horizontal(|ui| {
+                            ui.label("Tablet limit");
+                            let label = match self.cfg.max_tablets {
+                                TabletLimit::Auto => "Automatic".into(),
+                                TabletLimit::Fixed(limit) => limit.to_string(),
+                            };
+                            egui::ComboBox::from_id_salt("tablet_limit")
+                                .selected_text(label)
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut self.cfg.max_tablets,
+                                        TabletLimit::Auto,
+                                        "Automatic",
+                                    );
+                                    for limit in 1..=TabletLimit::MAX_FIXED {
+                                        ui.selectable_value(
+                                            &mut self.cfg.max_tablets,
+                                            TabletLimit::Fixed(limit),
+                                            limit.to_string(),
+                                        );
+                                    }
+                                });
+                        });
+                        ui.label(egui::RichText::new(
+                            "Automatic uses the available EVDI displays. A number sets a maximum.")
+                            .small().weak());
                         ui.checkbox(
                             &mut self.cfg.pointer_handoff,
                             "Leave the mouse cursor where the pen was lifted",
@@ -1011,6 +1037,22 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gui_keeps_automatic_tablet_slots_when_saving_other_settings() {
+        for (mode, expected) in [
+            ("\"auto\"", toml::Value::String("auto".into())),
+            ("3", toml::Value::Integer(3)),
+        ] {
+            let source = format!("max_tablets = {mode}\nencoder = \"libx264\"\nfps = 30\n");
+            let mut config: FileConfig = toml::from_str(&source).unwrap();
+            assert_eq!(config.encoder, "libx264");
+            config.fps = 45;
+            let saved = toml::Value::try_from(config).unwrap();
+            assert_eq!(saved["max_tablets"], expected);
+            assert_eq!(saved["fps"].as_integer(), Some(45));
+        }
+    }
 
     fn isolated(name: &str, script: &str) -> bool {
         if std::env::var("USCREEN_ENCODER_TEST_CASE").as_deref() == Ok(name) {
