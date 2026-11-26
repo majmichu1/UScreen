@@ -758,34 +758,6 @@ impl eframe::App for App {
                     ui.checkbox(&mut self.cfg.check_updates, "Check for a newer release on start");
                     ui.end_row();
 
-                    ui.label("Tablets");
-                    ui.vertical(|ui| {
-                        let label = match self.cfg.max_tablets {
-                            TabletLimit::Auto => "Automatic".into(),
-                            TabletLimit::Fixed(limit) => limit.to_string(),
-                        };
-                        egui::ComboBox::from_id_salt("tablet_limit")
-                            .selected_text(label)
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut self.cfg.max_tablets,
-                                    TabletLimit::Auto,
-                                    "Automatic",
-                                );
-                                for limit in 1..=TabletLimit::MAX_FIXED {
-                                    ui.selectable_value(
-                                        &mut self.cfg.max_tablets,
-                                        TabletLimit::Fixed(limit),
-                                        limit.to_string(),
-                                    );
-                                }
-                            });
-                        ui.label(egui::RichText::new(
-                            "Automatic uses the available EVDI displays. A number sets a ceiling.")
-                            .small().weak());
-                    });
-                    ui.end_row();
-
                     ui.label("Connection");
                     ui.vertical(|ui| {
                         egui::ComboBox::from_id_salt("adb_transport")
@@ -930,6 +902,36 @@ impl eframe::App for App {
                             &mut self.cfg.auto_launch_app,
                             "Open the app on the tablet automatically",
                         );
+                        ui.label(egui::RichText::new(
+                            "With app auto-launch on, authorized ADB tablets with UScreen installed can get a slot. \
+                             With it off, closing the tablet app frees its slot. USB and Wi-Fi count once per tablet.")
+                            .small().weak());
+                        ui.horizontal(|ui| {
+                            ui.label("Tablet limit");
+                            let label = match self.cfg.max_tablets {
+                                TabletLimit::Auto => "Automatic".into(),
+                                TabletLimit::Fixed(limit) => limit.to_string(),
+                            };
+                            egui::ComboBox::from_id_salt("tablet_limit")
+                                .selected_text(label)
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut self.cfg.max_tablets,
+                                        TabletLimit::Auto,
+                                        "Automatic",
+                                    );
+                                    for limit in 1..=TabletLimit::MAX_FIXED {
+                                        ui.selectable_value(
+                                            &mut self.cfg.max_tablets,
+                                            TabletLimit::Fixed(limit),
+                                            limit.to_string(),
+                                        );
+                                    }
+                                });
+                        });
+                        ui.label(egui::RichText::new(
+                            "Automatic uses the available EVDI displays. A number sets a maximum.")
+                            .small().weak());
                         ui.checkbox(
                             &mut self.cfg.pointer_handoff,
                             "Leave the mouse cursor where the pen was lifted",
